@@ -1,0 +1,26 @@
+name: Ukesoppsummering (BNC Selger)
+
+# Lager ukesoppsummering pr. selger og legger den i e-postkøen. Kjører fredag.
+# 13:00 UTC ≈ 14–15 norsk tid.
+
+on:
+  schedule:
+    - cron: "0 13 * * 5"
+  workflow_dispatch:
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: |
+          python -m pip install --upgrade pip
+          for a in 1 2 3; do pip install --retries 5 --timeout 60 requests && break; [ "$a" = 3 ] && exit 1; sleep $((a*20)); done
+      - name: Bygg ukesoppsummering
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python scripts/weekly_summary.py
