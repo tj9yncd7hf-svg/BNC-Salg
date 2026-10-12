@@ -208,6 +208,25 @@ if LOGO.exists():
     st.image(str(LOGO), width=160)
 st.title("Selger på veien")
 
+# Enkel delt passord-gate. Settes i Streamlit Secrets som APP_PASSWORD. Når appen
+# kjøres som en OFFENTLIG app (alle med lenken kan åpne den) bør denne være satt.
+# Er den tom, er appen åpen.
+APP_PASSWORD = os.getenv("APP_PASSWORD", "")
+try:
+    if not APP_PASSWORD:
+        APP_PASSWORD = str(st.secrets.get("APP_PASSWORD", ""))
+except Exception:
+    pass
+if APP_PASSWORD and not st.session_state.get("_authed"):
+    _pw = st.text_input("Passord", type="password")
+    if st.button("Logg inn", type="primary"):
+        if _pw == APP_PASSWORD:
+            st.session_state["_authed"] = True
+            st.rerun()
+        else:
+            st.error("Feil passord.")
+    st.stop()
+
 if not sb_configured():
     st.error("Supabase er ikke konfigurert (SUPABASE_URL / SUPABASE_SECRET_KEY mangler).")
 
