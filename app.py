@@ -281,7 +281,8 @@ def gmaps_route_url(start, stops):
     if not stops:
         return None
     enc = urllib.parse.quote
-    origin = start.get("label") or f"{start['lat']},{start['lon']}"
+    lbl = (start.get("label") or "").strip()
+    origin = lbl if lbl and lbl != "(underveis)" else f"{start['lat']},{start['lon']}"
     dest = _place_q(stops[-1])
     mids = stops[:-1][:9]
     url = (f"https://www.google.com/maps/dir/?api=1&origin={enc(origin)}"
@@ -797,15 +798,32 @@ def route_map(start, route):
 # ============================================================== MIN DAG =======
 if nav == "Min dag":
     today = date.today()
-    wd = UKEDAGER[today.weekday()].capitalize()
-    page_header("Min dag", f"{wd} {today.strftime('%d.%m.%Y')} – dagens planlagte rute")
-    plan = get_plan(email, today)
+    _plans = list_plans(email)            # kommende planlagte dager (>= i dag)
+    byd = {p["plan_date"]: p for p in _plans}
+    opts = sorted(set(byd.keys()) | {today.isoformat()})
+    default_iso = today.isoformat() if today.isoformat() in opts else opts[0]
+    sel_iso = default_iso
+    if len(opts) > 1:
+        def _fmt_day(iso):
+            dt = datetime.fromisoformat(iso).date()
+            n = len(byd.get(iso, {}).get("companies") or [])
+            tag = f" — {n} besøk" if n else " — ingen rute"
+            pre = "I dag · " if dt == today else ""
+            return f"{pre}{UKEDAGER[dt.weekday()].capitalize()} {dt.strftime('%d.%m.%Y')}{tag}"
+        sel_iso = st.selectbox("Velg dag", opts, index=opts.index(default_iso),
+                               format_func=_fmt_day)
+    seldate = datetime.fromisoformat(sel_iso).date()
+    wd = UKEDAGER[seldate.weekday()].capitalize()
+    _subtitle = ("dagens planlagte rute" if seldate == today else "planlagt rute")
+    page_header("Min dag", f"{wd} {seldate.strftime('%d.%m.%Y')} – {_subtitle}")
+    plan = byd.get(sel_iso) or get_plan(email, seldate)
     route = (plan or {}).get("companies") or []
     start = (plan or {}).get("start")
     meta = (plan or {}).get("meta") or {}
 
     if not route:
-        st.info("📅 Ingen planlagt rute for i dag. Gå til **Planlegging** for å sette opp ruter "
+        _når = "i dag" if seldate == today else "denne dagen"
+        st.info(f"📅 Ingen planlagt rute {_når}. Gå til **Planlegging** for å sette opp ruter "
                 "– eller bruk **Drop-in** for et besøk på sparket.")
     else:
         h = int(meta.get("total_min", 0)) // 60
@@ -861,9 +879,9 @@ if nav == "Min dag":
                             exclude_company(email, s)
                             rest = [x for x in route if str(x.get("orgnr")) != org]
                             if rest:
-                                save_plan(email, today, start, rest, meta)
+                                save_plan(email, seldate, start, rest, meta)
                             else:
-                                delete_plan(email, today.isoformat())
+                                delete_plan(email, seldate.isoformat())
                             st.session_state["_toast"] = f"{s.get('navn','')} skjult fra forslag."
                             st.rerun()
                         except Exception as exc:
@@ -1044,7 +1062,17 @@ if nav == "Planlegging":
             tittel = f"📅 {UKEDAGER[dt.weekday()].capitalize()} {dt.strftime('%d.%m.%Y')} — {len(comps)} besøk"
         except Exception:
             dt, tittel = None, f"📅 {d} — {len(comps)} besøk"
+        pstart = p.get("start")
+        pmeta = p.get("meta") or {}
         with st.expander(tittel):
+            pm = int(pmeta.get("total_min", 0))
+            if pmeta:
+                st.caption(f"≈ {pmeta.get('total_km', 0)} km · {pm // 60}t {pm % 60}min kjøring")
+            if pstart and pstart.get("lat") is not None and comps:
+                route_map(pstart, comps)
+            g_url = gmaps_route_url(pstart, comps) if pstart else None
+            if g_url:
+                st.link_button("🧭  Åpne ruta i Google Maps", g_url, use_container_width=True)
             for s in comps:
                 st.markdown(f"- **{s.get('stop','')}. {s.get('navn','')}** "
                             f"<span class='bnc-sub'>({s.get('poststed','')})</span>",
