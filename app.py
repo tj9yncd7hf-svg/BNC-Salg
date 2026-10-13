@@ -22,14 +22,23 @@ DATA_FILE = APP_DIR / "data" / "companies.json"
 LOGO = APP_DIR / "assets" / "bnc_logo_navy.webp"
 BACKOFFICE_EMAIL = os.getenv("BACKOFFICE_EMAIL", "post@bncnordic.no")
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
-SUPABASE_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
-if not SUPABASE_URL:
+def _secret(name, default=""):
+    v = os.getenv(name, "")
+    if v:
+        return v
     try:
-        SUPABASE_URL = str(st.secrets.get("SUPABASE_URL", "")).rstrip("/")
-        SUPABASE_KEY = str(st.secrets.get("SUPABASE_SECRET_KEY", ""))
+        return str(st.secrets.get(name, default))
     except Exception:
-        pass
+        return default
+
+
+SUPABASE_URL = _secret("SUPABASE_URL").rstrip("/")
+SUPABASE_KEY = _secret("SUPABASE_SECRET_KEY")
+
+# Admin (kan opprette brukere). Komma-separert liste i Secrets om flere.
+ADMIN_EMAILS = {e.strip().lower() for e in _secret("ADMIN_EMAILS", "andre@bncnordic.no").split(",") if e.strip()}
+# Appens egen adresse – brukes til å bygge personlige innloggingslenker.
+APP_BASE_URL = _secret("APP_BASE_URL").rstrip("/")
 
 # Vennlige bransjenavn (kategori-feltet i companies.json). Rekkefølge = visning.
 KATEGORIER = [
@@ -243,7 +252,30 @@ LOGIN_TOKEN = (hashlib.sha256(("bncselger::" + APP_PASSWORD).encode()).hexdigest
                if APP_PASSWORD else "")
 
 _qp = st.query_params
-# Auto-innlogging fra lenken.
+
+
+def _valid_personal_link():
+    """Personlig lenke ?u=<e-post>&k=<token> → brukeren slipper passord/e-post."""
+    u = (_qp.get("u") or "").strip().lower()
+    k = _qp.get("k") or ""
+    if not (u and k):
+        return None
+    try:
+        rows = sb_get("salesperson_settings", "email,login_token", {"email": f"eq.{u}"})
+        if rows and rows[0].get("login_token") and rows[0]["login_token"] == k:
+            return u
+    except Exception:
+        return None
+    return None
+
+
+# 1) Personlig lenke logger inn direkte (admin har satt opp brukeren).
+if not st.session_state.get("_authed"):
+    _pu = _valid_personal_link()
+    if _pu:
+        st.session_state["_authed"] = True
+        st.session_state["user_email"] = _pu
+# 2) Ellers: husk tidligere passord-innlogging i lenken (?t=).
 if APP_PASSWORD and not st.session_state.get("_authed") and _qp.get("t") == LOGIN_TOKEN:
     st.session_state["_authed"] = True
 # Forhåndsutfyll e-post fra lenken.
@@ -277,8 +309,11 @@ if LOGIN_TOKEN and _qp.get("t") != LOGIN_TOKEN:
     st.query_params["t"] = LOGIN_TOKEN
 
 _settings = load_settings(email)
-nav = st.radio("", ["📍 Min dag", "📝 Besøk", "✉️ Maler", "📚 Historikk", "⚙️ Innstillinger"],
-               horizontal=True, label_visibility="collapsed", key="nav")
+is_admin = email in ADMIN_EMAILS
+_navopts = ["📍 Min dag", "📝 Besøk", "✉️ Maler", "📚 Historikk", "⚙️ Innstillinger"]
+if is_admin:
+    _navopts.append("👤 Brukere")
+nav = st.radio("", _navopts, horizontal=True, label_visibility="collapsed", key="nav")
 
 companies = load_companies()
 if not companies:
@@ -639,12 +674,92 @@ if nav == "⚙️ Innstillinger":
     # ---- Pålogging / brukere --------------------------------------------------
     st.divider()
     st.markdown("#### Pålogging")
-    st.caption("Appen husker innloggingen i nettadressen. Når du er logget inn: "
-               "**legg appen til på Hjem-skjerm på mobilen** (del-knappen → «Legg til "
-               "på Hjem-skjerm») – da åpner snarveien rett inn, uten passord og e-post. "
-               "Hver selger logger inn med sin egen e-post og får sin egen profil/historikk.")
+    if is_admin:
+        st.caption("Du er **admin**. Under **👤 Brukere** kan du opprette brukere og sende "
+                   "hver en personlig lenke – da logger de inn uten passord. Appen husker "
+                   "også innloggingen i nettadressen, så «Legg til på Hjem-skjerm» gir en "
+                   "snarvei som åpner rett inn.")
+    else:
+        st.caption("Åpne den personlige lenken du fikk, og **legg appen til på Hjem-skjerm** "
+                   "(del-knappen → «Legg til på Hjem-skjerm») – da åpner snarveien rett inn, "
+                   "uten passord og e-post. Du har din egen profil og historikk.")
     if st.button("🚪 Logg ut (fjern minnet i lenken)"):
         st.query_params.clear()
         for k in ("_authed", "user_email", "route", "route_start", "selected_company"):
             st.session_state.pop(k, None)
         st.rerun()
+
+
+# =============================================================== BRUKERE ======
+if nav == "👤 Brukere" and is_admin:
+    import secrets as _secrets
+    st.subheader("Brukere")
+    st.caption("Opprett en bruker (navn + e-post) og send den **personlige lenken** til "
+               "vedkommende. Når de åpner lenken er de logget inn – uten passord og uten å "
+               "taste e-post – og kan legge appen til på Hjem-skjerm. Hver bruker har egen "
+               "profil og historikk.")
+
+    def personal_link(u):
+        tok = u.get("login_token")
+        if not tok:
+            return None
+        q = urllib.parse.urlencode({"u": u["email"], "k": tok})
+        return f"{APP_BASE_URL}/?{q}" if APP_BASE_URL else f"?{q}"
+
+    with st.form("ny_bruker"):
+        bn = st.text_input("Navn", placeholder="F.eks. Kim Werner Strand")
+        be = st.text_input("E-post", placeholder="kim@bncnordic.no").strip().lower()
+        if st.form_submit_button("➕ Opprett bruker / lag ny lenke", type="primary"):
+            if be:
+                try:
+                    sb_upsert("salesperson_settings", {
+                        "email": be, "name": bn,
+                        "login_token": _secrets.token_urlsafe(12),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }, "email")
+                    st.success("✅ Bruker klar – lenken vises i lista under.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Kunne ikke lagre: {exc}")
+            else:
+                st.error("Skriv inn e-post.")
+
+    if not APP_BASE_URL:
+        st.warning("Tips: legg **APP_BASE_URL** i Streamlit Secrets (appens adresse, f.eks. "
+                   "`https://bnc-salg-xxx.streamlit.app`), så blir lenkene komplette og "
+                   "klikkbare. Uten den vises bare «?u=…&k=…»-delen som du selv setter "
+                   "foran appens adresse.")
+
+    try:
+        users = sb_get("salesperson_settings", "email,name,login_token", {"order": "email.asc"})
+    except Exception as exc:
+        users = []
+        st.error(f"Kunne ikke hente brukere: {exc}")
+    st.markdown(f"**{len(users)} bruker(e)**")
+    for u in users:
+        link = personal_link(u)
+        tag = " · 👑 admin" if u["email"] in ADMIN_EMAILS else ""
+        st.markdown(f"**{u.get('name') or '(uten navn)'}** — {u['email']}{tag}")
+        if link:
+            st.code(link, language=None)
+        else:
+            st.caption("Ingen lenke ennå – trykk «Ny lenke».")
+        cc = st.columns(2)
+        if cc[0].button("🔄 Ny lenke", key=f"newlink_{u['email']}"):
+            try:
+                sb_upsert("salesperson_settings", {
+                    "email": u["email"], "login_token": _secrets.token_urlsafe(12),
+                    "updated_at": datetime.now(timezone.utc).isoformat()}, "email")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"{exc}")
+        if u["email"] not in ADMIN_EMAILS:
+            if cc[1].button("🚫 Steng lenke", key=f"revoke_{u['email']}"):
+                try:
+                    sb_upsert("salesperson_settings", {
+                        "email": u["email"], "login_token": None,
+                        "updated_at": datetime.now(timezone.utc).isoformat()}, "email")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"{exc}")
+        st.divider()
