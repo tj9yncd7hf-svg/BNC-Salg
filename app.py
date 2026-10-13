@@ -271,10 +271,19 @@ def month_key(d=None):
 
 
 def _place_q(p):
-    omr = f"{p.get('postnr','')} {p.get('poststed','')}".strip()
-    parts = [p.get("navn", ""), p.get("adresse", ""), omr]
-    q = ", ".join(x for x in parts if x)
-    return q or f"{p.get('lat')},{p.get('lon')}"
+    # Naviger på ADRESSEN, ikke firmanavnet. Navn som destinasjon får Google til å
+    # gjøre et bedriftssøk og lande på nærmeste treff ved brukerens posisjon.
+    adr = str(p.get("adresse", "") or "")
+    segs = [s.strip() for s in adr.split(",") if s.strip()
+            and not s.strip().lower().startswith(("c/o", "co ", "postboks", "pb "))]
+    street = segs[-1] if segs else ""
+    if street:
+        omr = f"{p.get('postnr','')} {p.get('poststed','')}".strip()
+        return ", ".join(x for x in [street, omr] if x)
+    lat, lon = p.get("lat"), p.get("lon")
+    if lat is not None:
+        return f"{lat},{lon}"
+    return f"{p.get('postnr','')} {p.get('poststed','')}".strip()
 
 
 def gmaps_route_url(start, stops):
