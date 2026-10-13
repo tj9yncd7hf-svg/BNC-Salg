@@ -139,6 +139,16 @@ st.markdown("""
   :root{ --navy:#1b2a4a; --navy-hi:#2a3e66; --green:#1f9d5b; }
   html, body, [class*="css"]{ font-family:'Inter',system-ui,sans-serif; }
   .stApp{ background:#eef1f5; }
+  /* Skjul Streamlit-chrome (meny, verktøylinje, deploy, header, footer, badge) */
+  #MainMenu{ display:none !important; }
+  [data-testid="stToolbar"], [data-testid="stToolbarActions"]{ display:none !important; }
+  [data-testid="stDecoration"]{ display:none !important; }
+  .stAppDeployButton, [data-testid="stAppDeployButton"]{ display:none !important; }
+  header[data-testid="stHeader"]{ background:transparent; height:0; }
+  [data-testid="stStatusWidget"]{ display:none !important; }
+  footer{ visibility:hidden; height:0; }
+  [data-testid="stAppViewBadge"], .viewerBadge_container__r5tak,
+  [class*="viewerBadge"]{ display:none !important; }
   .block-container{ max-width:1240px; padding-top:1.4rem; padding-bottom:3rem; }
   h1,h2,h3,h4{ font-family:'Archivo','Inter',sans-serif; color:#1c2534; }
   section[data-testid="stSidebar"]{ background:#1b2a4a; }
