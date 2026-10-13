@@ -84,11 +84,12 @@ DEFAULT_CONTENT = {
             "Hei,\n\n"
             "Her er oppsummeringen av uka ({periode}):\n\n"
             "Totalt {antall} besøk.\n"
-            "Utfall: {utfall}\n\n"
+            "Utfall: {utfall}\n"
+            "Kjørt denne uka: {total_km} km (~{total_co2} kg CO₂e)\n\n"
             "Besøk:\n{besok_liste}\n\n"
             "Stå på!\nBNC Nordic"
         ),
-        "vars": "{navn}, {periode}, {antall}, {utfall}, {besok_liste}",
+        "vars": "{navn}, {periode}, {antall}, {utfall}, {besok_liste}, {total_km}, {total_co2}",
         "label": "Ukesoppsummering (til selger, fredager)",
     },
     "report": {
@@ -98,13 +99,26 @@ DEFAULT_CONTENT = {
             "Bedrift: {bedrift} (org {orgnr})\n"
             "Adresse: {adresse}\n"
             "Dato: {dato}\n"
-            "Utfall: {utfall}\n\n"
+            "Utfall: {utfall}\n"
+            "Kjøring til besøket: {km} km (~{co2} kg CO₂e)\n\n"
             "Rapport:\n{rapport}\n"
         ),
-        "vars": "{selger}, {bedrift}, {orgnr}, {adresse}, {dato}, {utfall}, {rapport}",
+        "vars": "{selger}, {bedrift}, {orgnr}, {adresse}, {dato}, {utfall}, {rapport}, {km}, {co2}",
         "label": "Besøksrapport (til backoffice, samme dag)",
     },
 }
+
+
+def co2_factor(settings):
+    """g CO₂e pr. km fra profilen (standard elbil-anslag)."""
+    try:
+        return float(settings.get("co2_g_per_km") or 13)
+    except Exception:
+        return 13.0
+
+
+def co2_kg(km, settings):
+    return round(float(km or 0) * co2_factor(settings) / 1000.0, 2)
 
 
 def apply_vars(text, mapping):
@@ -472,14 +486,18 @@ if nav == "Min dag":
         st.write("")
         h = int(meta.get("total_min", 0)) // 60
         m = int(meta.get("total_min", 0)) % 60
-        s1, s2, s3 = st.columns(3)
+        day_co2 = co2_kg(meta.get("total_km", 0), _settings)
+        s1, s2, s3, s4 = st.columns(4)
         s1.markdown(f"<div class='bnc-stat'><div class='k'>Besøk i ruta</div>"
                     f"<div class='v'>{len(route)}</div></div>", unsafe_allow_html=True)
         s2.markdown(f"<div class='bnc-stat'><div class='k'>Samlet kjøring</div>"
                     f"<div class='v'>{meta.get('total_km',0)} <small>km</small></div></div>", unsafe_allow_html=True)
         s3.markdown(f"<div class='bnc-stat'><div class='k'>Beregnet tid</div>"
                     f"<div class='v'>{h} t {m} <small>min</small></div></div>", unsafe_allow_html=True)
-        st.caption(f"Av {meta.get('n_candidates', 0)} aktuelle bedrifter innenfor valgene dine.")
+        s4.markdown(f"<div class='bnc-stat'><div class='k'>Klimaavtrykk</div>"
+                    f"<div class='v'>{day_co2} <small>kg CO₂e</small></div></div>", unsafe_allow_html=True)
+        st.caption(f"Av {meta.get('n_candidates', 0)} aktuelle bedrifter innenfor valgene dine. "
+                   f"CO₂e beregnet med {int(co2_factor(_settings))} g/km (endres under Innstillinger).")
         st.write("")
 
         show_map = st.checkbox("Vis kart", value=True)
@@ -572,17 +590,21 @@ if nav == "Besøk":
         if lagre:
             try:
                 today = date.today()
+                leg_km = round(float(sel.get("leg_km") or 0), 1)
+                visit_co2_g = round(leg_km * co2_factor(_settings), 1)
                 sb_insert("visits", {
                     "user_email": email, "orgnr": str(sel.get("orgnr")),
                     "navn": sel.get("navn", ""), "kommune": sel.get("kommune", ""),
                     "visited_on": today.isoformat(), "month_key": month_key(today),
                     "report": report, "outcome": outcome, "contact_email": contact,
+                    "leg_km": leg_km, "co2_g": visit_co2_g,
                 })
                 rc = get_content("report")
                 rmap = {"selger": email, "bedrift": sel.get("navn", ""),
                         "orgnr": sel.get("orgnr", ""),
                         "adresse": f"{sel.get('adresse','')}, {sel.get('postnr','')} {sel.get('poststed','')}",
-                        "dato": today.isoformat(), "utfall": outcome, "rapport": report}
+                        "dato": today.isoformat(), "utfall": outcome, "rapport": report,
+                        "km": leg_km, "co2": co2_kg(leg_km, _settings)}
                 sb_insert("email_queue", {
                     "kind": "report", "to_email": BACKOFFICE_EMAIL,
                     "subject": apply_vars(rc["subject"], rmap),
@@ -621,7 +643,18 @@ if nav == "Historikk":
     except Exception as exc:
         rows = []
         st.error(f"Kunne ikke hente: {exc}")
-    st.caption(f"{len(rows)} besøk i {month_key()}.")
+    tot_km = round(sum(float(r.get("leg_km") or 0) for r in rows), 1)
+    tot_co2 = round(sum(float(r.get("co2_g") or 0) for r in rows) / 1000.0, 1)
+    m1, m2, m3 = st.columns(3)
+    m1.markdown(f"<div class='bnc-stat'><div class='k'>Besøk</div>"
+                f"<div class='v'>{len(rows)}</div></div>", unsafe_allow_html=True)
+    m2.markdown(f"<div class='bnc-stat'><div class='k'>Kjørt (km)</div>"
+                f"<div class='v'>{tot_km}</div></div>", unsafe_allow_html=True)
+    m3.markdown(f"<div class='bnc-stat'><div class='k'>Klimaavtrykk</div>"
+                f"<div class='v'>{tot_co2} <small>kg CO₂e</small></div></div>", unsafe_allow_html=True)
+    st.caption("Kjøring summeres fra avstanden til hvert registrerte besøk (anslag for "
+               "konsernrapportering). Besøk søkt opp manuelt teller 0 km.")
+    st.write("")
     _cls = {"Interessert": "b-ok", "Solgt": "b-ok", "Vil tenke": "b-warn",
             "Ikke til stede": "b-no", "Ikke interessert": "b-no"}
     for r in rows:
@@ -659,7 +692,12 @@ if nav == "Innstillinger":
                 cc1, cc2 = st.columns(2)
                 hours = cc1.number_input("Timer pr. dag", 1.0, 12.0, float(_settings.get("hours_per_day") or 7), 0.5)
                 visit_min = cc2.number_input("Snitt pr. besøk (min)", 10, 180, int(_settings.get("avg_visit_minutes") or 60), 5)
-                speed = st.number_input("Snittfart bil (km/t)", 30, 110, int(_settings.get("speed_kmh") or 70), 5)
+                cc3, cc4 = st.columns(2)
+                speed = cc3.number_input("Snittfart bil (km/t)", 30, 110, int(_settings.get("speed_kmh") or 70), 5)
+                co2 = cc4.number_input("Utslipp (g CO₂e/km)", 0, 400, int(_settings.get("co2_g_per_km") or 13), 1,
+                                       help="For konsernrapportering. Typiske anslag: elbil ~13, "
+                                            "ladbar hybrid ~60, bensin ~165, diesel ~170. Sett faktoren "
+                                            "konsernet rapporterer med.")
         lagre = st.form_submit_button("💾  Lagre innstillinger", type="primary")
     if lagre:
         lat, lon, label = (_settings.get("start_lat"), _settings.get("start_lon"), start_label)
@@ -673,6 +711,7 @@ if nav == "Innstillinger":
                 "summary_email": summary_email.strip().lower(),
                 "start_label": label, "start_lat": lat, "start_lon": lon,
                 "hours_per_day": hours, "avg_visit_minutes": visit_min, "speed_kmh": speed,
+                "co2_g_per_km": co2,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }, "email")
             st.success("✅ Lagret." + (f" Startposisjon: {label}." if lat else
@@ -786,13 +825,15 @@ if nav == "E-postinnhold" and is_admin:
         elif tt_kind == "summary":
             demo = {"navn": _settings.get("name") or "Kim", "periode": "13.10 – 17.10",
                     "antall": "2", "utfall": "Interessert: 1, Vil tenke: 1",
+                    "total_km": "84,2", "total_co2": "1,1",
                     "besok_liste": "- 13.10  Eksempel Bil AS (OSLO) – Interessert\n"
                                    "- 14.10  Demo Verksted AS (BÆRUM) – Vil tenke"}
             tsub, tbody = apply_vars(cur["subject"], demo), apply_vars(cur["body"], demo)
         else:
             demo = {"selger": email, "bedrift": "Eksempel Bil AS", "orgnr": "999999999",
                     "adresse": "Eksempelveien 1, 0001 OSLO", "dato": date.today().isoformat(),
-                    "utfall": "Interessert", "rapport": "Testrapport for å kontrollere formatet."}
+                    "utfall": "Interessert", "km": "12,4", "co2": "0,16",
+                    "rapport": "Testrapport for å kontrollere formatet."}
             tsub, tbody = apply_vars(cur["subject"], demo), apply_vars(cur["body"], demo)
         st.caption("Forhåndsvisning:")
         st.code(tsub, language=None)

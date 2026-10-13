@@ -32,7 +32,7 @@ def sb_headers():
 def week_visits():
     r = requests.get(f"{SUPABASE_URL}/rest/v1/visits",
                      headers=sb_headers(),
-                     params={"select": "user_email,navn,kommune,outcome,visited_on",
+                     params={"select": "user_email,navn,kommune,outcome,visited_on,leg_km,co2_g",
                              "visited_on": f"gte.{MONDAY.isoformat()}",
                              "order": "visited_on.asc"},
                      timeout=30)
@@ -64,7 +64,8 @@ def summary_recipients():
 DEFAULT_SUMMARY_SUBJECT = "Ukesoppsummering: {antall} besøk ({periode})"
 DEFAULT_SUMMARY_BODY = (
     "Hei,\n\nHer er oppsummeringen av uka ({periode}):\n\n"
-    "Totalt {antall} besøk.\nUtfall: {utfall}\n\n"
+    "Totalt {antall} besøk.\nUtfall: {utfall}\n"
+    "Kjørt denne uka: {total_km} km (~{total_co2} kg CO₂e)\n\n"
     "Besøk:\n{besok_liste}\n\nStå på!\nBNC Nordic"
 )
 
@@ -106,9 +107,11 @@ def main():
         besok_liste = "\n".join(
             f"- {v['visited_on']}  {v.get('navn','')} ({v.get('kommune','')}) – {v.get('outcome','')}"
             for v in vs)
+        tot_km = round(sum(float(v.get("leg_km") or 0) for v in vs), 1)
+        tot_co2 = round(sum(float(v.get("co2_g") or 0) for v in vs) / 1000.0, 1)
         m = {"navn": name or user, "periode": periode, "antall": len(vs),
              "utfall": ", ".join(f"{k}: {n}" for k, n in outc.most_common()),
-             "besok_liste": besok_liste}
+             "besok_liste": besok_liste, "total_km": tot_km, "total_co2": tot_co2}
         try:
             queue(to_email, apply_vars(subj_tpl, m), apply_vars(body_tpl, m))
             print(f"  kø: {user} -> {to_email} ({len(vs)} besøk)")
