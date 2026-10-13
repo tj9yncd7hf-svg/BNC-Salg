@@ -221,14 +221,41 @@ def load_companies():
 
 
 def geocode(text):
+    """Finn startpunkt: 1) adresse, 2) offisielt stedsnavn, 3) POI (Nominatim/OSM).
+    Dekker «gate nr, sted», «Molde lufthavn» og dagligtale som «molde flyplass»."""
+    t = (text or "").strip()
+    if not t:
+        return None, None, text
+    # 1) Kartverket adresser
     try:
         r = requests.get("https://ws.geonorge.no/adresser/v1/sok",
-                         params={"sok": text, "treffPerSide": 1, "utkoordsys": 4258}, timeout=20)
+                         params={"sok": t, "treffPerSide": 1, "utkoordsys": 4258}, timeout=15)
         adr = (r.json().get("adresser") or [])
         if adr:
             rp = adr[0].get("representasjonspunkt") or {}
             if rp.get("lat"):
-                return float(rp["lat"]), float(rp["lon"]), adr[0].get("adressetekst", text)
+                return float(rp["lat"]), float(rp["lon"]), adr[0].get("adressetekst", t)
+    except Exception:
+        pass
+    # 2) Kartverket stedsnavn (offisielle steder/POI)
+    try:
+        r = requests.get("https://api.kartverket.no/stedsnavn/v1/navn",
+                         params={"sok": t, "utkoordsys": 4258, "treffPerSide": 1}, timeout=15)
+        navn = (r.json().get("navn") or [])
+        if navn:
+            rp = navn[0].get("representasjonspunkt") or {}
+            if rp.get("nord"):
+                return float(rp["nord"]), float(rp["øst"]), navn[0].get("skrivemåte", t)
+    except Exception:
+        pass
+    # 3) Nominatim (OpenStreetMap) – POI og dagligtale
+    try:
+        r = requests.get("https://nominatim.openstreetmap.org/search",
+                         params={"q": t, "format": "json", "limit": 1, "countrycodes": "no"},
+                         headers={"User-Agent": "BNC-Selger/1.0 (post@bncnordic.no)"}, timeout=15)
+        js = r.json()
+        if js:
+            return float(js[0]["lat"]), float(js[0]["lon"]), t
     except Exception:
         pass
     return None, None, text
