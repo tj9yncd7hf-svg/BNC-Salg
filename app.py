@@ -52,7 +52,7 @@ APP_BASE_URL = _secret("APP_BASE_URL").rstrip("/")
 KATEGORIER = [
     "Verksted", "Bilpleie", "Bilforhandler", "Delegrossist",
     "Bildeler & rekvisita (butikk)", "Bilgrossist (import/engros)",
-    "Bensinstasjon / drivstoff", "Bilutleie", "MC-verksted", "MC-forhandler",
+    "Bensinstasjon / drivstoff", "MC-verksted", "MC-forhandler", "MC-utstyr & klær",
 ]
 
 # ---------------------------------------------------------- e-postinnhold -----
@@ -455,6 +455,9 @@ if nav == "Min dag":
             valgte_cat = st.multiselect(
                 "Bransjer", _kat_present, default=[],
                 help="La stå tom og huk av «Velg alle bransjer», eller velg kun de du vil besøke.")
+            inkluder_enk = st.checkbox(
+                "Ta med enkeltpersonforetak (ENK)", value=True,
+                help="Av = kun aksjeselskap (AS). ENK er ofte små bilpleie-/verksted-aktører.")
             maxkm = st.slider("Maks avstand mellom besøk (km)", 10, 300, 120, 10)
             planlegg = st.form_submit_button("🧭  Foreslå rute", type="primary",
                                              use_container_width=True)
@@ -472,7 +475,8 @@ if nav == "Min dag":
             else:
                 visited = visited_orgnr_this_month(email)
                 cands = [c for c in companies
-                         if c.get("kategori") in valgte and str(c.get("orgnr")) not in visited]
+                         if c.get("kategori") in valgte and str(c.get("orgnr")) not in visited
+                         and (inkluder_enk or c.get("orgform") != "ENK")]
                 res = routing.plan_route(lat, lon, cands, hours,
                                          visit_minutes=visit_min, max_leg_km=maxkm)
                 st.session_state["route"] = res["route"]
@@ -509,9 +513,12 @@ if nav == "Min dag":
                 st.link_button("🧭  Åpne hele ruta i Google Maps", g_url, use_container_width=True)
             st.markdown("#### Dagens besøk")
             for s in route:
+                _of = s.get("orgform", "")
+                _ofh = f" <small style='color:#6a7488'>{_of}</small> " if _of else ""
                 st.markdown(
                     f"<div class='bnc-stop'><b>{s['stop']}. {s.get('navn','')}</b><br>"
                     f"<span class='bnc-badge'>{s.get('kategori', s.get('bransje_kode',''))}</span>"
+                    f"{_ofh}"
                     f"{s.get('adresse','')}, {s.get('postnr','')} {s.get('poststed','')}<br>"
                     f"<small>+{s.get('leg_km')} km / {s.get('leg_min')} min · kum. {s.get('cum_min')} min</small></div>",
                     unsafe_allow_html=True)
