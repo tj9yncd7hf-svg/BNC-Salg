@@ -317,6 +317,25 @@ def recently_visited(email, days=28):
         return set()
 
 
+def planned_orgnr(email, skip_dates=()):
+    """Org.nr. som allerede ligger i andre kommende planlagte ruter – så samme bedrift
+    ikke foreslås på to datoer. skip_dates utelates (datoene som nå planlegges på nytt)."""
+    try:
+        rows = sb_get("planned_routes", "plan_date,companies",
+                      {"user_email": f"eq.{email}",
+                       "plan_date": f"gte.{date.today().isoformat()}"})
+        skip = {d.isoformat() for d in skip_dates}
+        out = set()
+        for r in rows:
+            if r.get("plan_date") in skip:
+                continue
+            for c in (r.get("companies") or []):
+                out.add(str(c.get("orgnr")))
+        return out
+    except Exception:
+        return set()
+
+
 def delete_visit(email, orgnr):
     sb_delete("visits", {"user_email": f"eq.{email}", "orgnr": f"eq.{orgnr}",
                          "month_key": f"eq.{month_key()}"})
@@ -649,10 +668,11 @@ def plan_trip(start_txt, til_txt, vias, from_date, to_date, hours, visit_min, va
 
     visited = recently_visited(email)
     excl = excluded_orgnr(email)
+    planned = planned_orgnr(email, skip_dates=weekdays)
+    skip = visited | excl | planned
     _off = {"Kun AS": "AS", "Kun ENK": "ENK"}.get(orgvalg)
     pool = [c for c in companies
-            if c.get("kategori") in valgte and str(c.get("orgnr")) not in visited
-            and str(c.get("orgnr")) not in excl
+            if c.get("kategori") in valgte and str(c.get("orgnr")) not in skip
             and (_off is None or c.get("orgform") == _off)]
     speed = float(_settings.get("speed_kmh") or 70)
 
