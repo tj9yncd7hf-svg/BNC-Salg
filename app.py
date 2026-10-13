@@ -139,16 +139,17 @@ st.markdown("""
   :root{ --navy:#1b2a4a; --navy-hi:#2a3e66; --green:#1f9d5b; }
   html, body, [class*="css"]{ font-family:'Inter',system-ui,sans-serif; }
   .stApp{ background:#eef1f5; }
-  /* Skjul Streamlit-chrome (meny, verktøylinje, deploy, header, footer, badge) */
+  /* Skjul Streamlit-chrome (meny, deploy, badge) – men BEHOLD sidebar-knappen */
   #MainMenu{ display:none !important; }
-  [data-testid="stToolbar"], [data-testid="stToolbarActions"]{ display:none !important; }
+  [data-testid="stToolbarActions"]{ display:none !important; }
   [data-testid="stDecoration"]{ display:none !important; }
   .stAppDeployButton, [data-testid="stAppDeployButton"]{ display:none !important; }
-  header[data-testid="stHeader"]{ background:transparent; height:0; }
   [data-testid="stStatusWidget"]{ display:none !important; }
   footer{ visibility:hidden; height:0; }
-  [data-testid="stAppViewBadge"], .viewerBadge_container__r5tak,
   [class*="viewerBadge"]{ display:none !important; }
+  header[data-testid="stHeader"]{ background:transparent; }
+  [data-testid="stSidebarCollapsedControl"],
+  [data-testid="collapsedControl"]{ display:block !important; visibility:visible !important; }
   .block-container{ max-width:1240px; padding-top:1.4rem; padding-bottom:3rem; }
   h1,h2,h3,h4{ font-family:'Archivo','Inter',sans-serif; color:#1c2534; }
   section[data-testid="stSidebar"]{ background:#1b2a4a; }
@@ -1081,136 +1082,73 @@ if nav == "Drop-in":
 
 # ============================================================ PLANLEGGING ======
 if nav == "Planlegging":
-    page_header("Planlegging", "Klikk fra-dato og til-dato i kalenderen – så legger du inn ruta under.")
+    page_header("Planlegging", "Tre korte steg: periode, område og besøksvalg.")
     today = date.today()
-    ss = st.session_state
-    ss.setdefault("sel_from", None)
-    ss.setdefault("sel_to", None)
-    ss.setdefault("cal_ym", (today.year, today.month))
-
     try:
         allplans = sb_get("planned_routes", "plan_date,companies,start,meta",
                           {"user_email": f"eq.{email}", "order": "plan_date.asc"})
     except Exception:
         allplans = []
-    plandates = {p["plan_date"]: len(p.get("companies") or []) for p in allplans}
-    MND = ["januar", "februar", "mars", "april", "mai", "juni", "juli", "august",
-           "september", "oktober", "november", "desember"]
+    pd_up = [p["plan_date"] for p in allplans if p["plan_date"] >= today.isoformat()]
 
-    cy, cm = ss["cal_ym"]
-    nc1, nc2, nc3 = st.columns([1, 3, 1])
-    if nc1.button("‹ Forrige", use_container_width=True):
-        ss["cal_ym"] = (cy - 1, 12) if cm == 1 else (cy, cm - 1)
-        st.rerun()
-    nc2.markdown(f"<h3 style='text-align:center;margin:4px 0'>{MND[cm-1].capitalize()} {cy}</h3>",
-                 unsafe_allow_html=True)
-    if nc3.button("Neste ›", use_container_width=True):
-        ss["cal_ym"] = (cy + 1, 1) if cm == 12 else (cy, cm + 1)
-        st.rerun()
+    with st.form("pl_form"):
+        st.markdown("##### 1 · Periode")
+        st.caption(f"📅 I dag er {UKEDAGER[today.weekday()]} {today.strftime('%d.%m.%Y')}.")
+        dr = st.date_input("Velg dato – eller klikk to datoer for en periode",
+                           value=(today, today), min_value=today, format="DD.MM.YYYY",
+                           key="pl_dr")
+        if pd_up:
+            _vis = ", ".join(datetime.fromisoformat(x).date().strftime("%d.%m") for x in pd_up[:8])
+            st.caption(f"📍 Ruter finnes alt på: {_vis}{' …' if len(pd_up) > 8 else ''}")
 
-    hdr = st.columns(7)
-    for i, wd in enumerate(["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"]):
-        hdr[i].markdown(f"<div style='text-align:center;color:#6a7488;font-size:12px;"
-                        f"font-weight:600'>{wd}</div>", unsafe_allow_html=True)
-    sf, stt = ss["sel_from"], ss["sel_to"]
-    for week in _cal.Calendar(firstweekday=0).monthdatescalendar(cy, cm):
-        cols = st.columns(7)
-        for i, d in enumerate(week):
-            with cols[i]:
-                if d.month != cm:
-                    st.markdown(f"<div style='text-align:center;color:#c5ccd6;padding:9px 0'>"
-                                f"{d.day}</div>", unsafe_allow_html=True)
-                    continue
-                in_sel = bool(sf and ((stt and sf <= d <= stt) or (not stt and d == sf)))
-                cnt = plandates.get(d.isoformat())
-                lbl = f"{d.day}" + (f"  ·{cnt}📍" if cnt else "")
-                if st.button(lbl, key=f"cal_{d.isoformat()}", use_container_width=True,
-                             type=("primary" if in_sel else "secondary")):
-                    if ss["sel_from"] is None or ss["sel_to"] is not None:
-                        ss["sel_from"] = d
-                        ss["sel_to"] = None
-                    elif d >= ss["sel_from"]:
-                        ss["sel_to"] = d
-                    else:
-                        ss["sel_from"] = d
-                        ss["sel_to"] = None
-                    st.rerun()
-    st.caption("📍 = dag med planlagt rute. Klikk én dato, så en til, for en periode.")
+        st.markdown("##### 2 · Område")
+        cst1, cst2 = st.columns(2)
+        tstart = cst1.text_input("Fra (start / base)", value=_settings.get("start_label", ""),
+                                 placeholder="F.eks. Lillehammer", key="pl_start")
+        ttil = cst2.text_input("Til (valgfritt)", placeholder="F.eks. Oslo", key="pl_til",
+                               help="Fyll ut for besøk LANGS veien Fra→Til. "
+                                    "La stå tomt for området rundt Fra.")
+        vias_txt = st.text_area("Mellomstopp – ett sted per linje (valgfritt)",
+                                key="pl_vias_txt", height=68, placeholder="F.eks.\nGjøvik\nHamar")
 
-    # --- Planleggingsskjema for valgt periode ---
-    if ss["sel_from"]:
-        fr = ss["sel_from"]
-        to = ss["sel_to"] or fr
-        flerdag = fr != to
-        if flerdag:
-            rngtxt = f"{fr.strftime('%d.%m')} – {to.strftime('%d.%m.%Y')}"
+        st.markdown("##### 3 · Besøksvalg")
+        bc1, bc2 = st.columns(2)
+        antall = bc1.number_input("Antall besøk pr. dag", 1, 20, 6, 1, key="pl_antall")
+        torg = bc2.selectbox("Selskapsform", ["AS + ENK", "Kun AS", "Kun ENK"], key="pl_org")
+        tall = st.checkbox("Velg alle aktuelle bransjer", value=True, key="pl_all")
+        tcat = st.multiselect("…eller velg bransjer selv", _kat_present, default=[], key="pl_cat")
+        with st.expander("Flere innstillinger (tid og avstand)"):
+            ec1, ec2 = st.columns(2)
+            thours = ec1.number_input("Timer pr. dag", 1.0, 12.0,
+                                      float(_settings.get("hours_per_day") or 7), 0.5,
+                                      key="pl_hours")
+            tvisit = ec2.number_input("Snitt pr. besøk (min)", 10, 180,
+                                      int(_settings.get("avg_visit_minutes") or 60), 5,
+                                      key="pl_visit")
+            tmax = st.slider("Maks avstand mellom besøk (km)", 10, 300, 120, 10, key="pl_max")
+            tdet = st.slider("Maks omvei fra strekning (km)", 2, 60, 15, key="pl_det")
+
+        go = st.form_submit_button("🧭  Lag rute(r)", type="primary", use_container_width=True)
+
+    if go:
+        if isinstance(dr, (list, tuple)):
+            fr, to = (dr[0], dr[-1]) if len(dr) >= 2 else (dr[0], dr[0])
         else:
-            rngtxt = f"{UKEDAGER[fr.weekday()].capitalize()} {fr.strftime('%d.%m.%Y')}"
-        st.divider()
-        with st.container(border=True):
-            hc = st.columns([4, 1])
-            hc[0].markdown(f"#### 🗓️ Planlegg {rngtxt}")
-            if hc[1].button("Nullstill", use_container_width=True):
-                ss["sel_from"] = None
-                ss["sel_to"] = None
+            fr = to = dr
+        valgte = _kat_present if tall else tcat
+        if not valgte:
+            st.warning("Velg minst én bransje – eller huk av «Velg alle aktuelle bransjer».")
+        else:
+            vias = [v.strip() for v in (vias_txt or "").splitlines() if v.strip()]
+            status, msg = plan_trip(tstart, ttil, vias, fr, to, thours, tvisit,
+                                    valgte, torg, tmax, tdet, n_visits=int(antall))
+            if status == "ok":
+                st.session_state["_toast"] = f"✅ {msg}"
                 st.rerun()
-            if flerdag:
-                st.caption(f"Flere dager ({(to - fr).days + 1}): har du fylt ut «Til», "
-                           "fordeles strekningen jevnt på hverdagene. Uten «Til» planlegges "
-                           "området rundt start hver dag.")
-            # Alt i ett skjema → ett trykk på mobil, uten å bekrefte hvert felt.
-            with st.form("pl_form"):
-                cst1, cst2 = st.columns(2)
-                tstart = cst1.text_input("Fra (startadresse)",
-                                         value=_settings.get("start_label", ""),
-                                         placeholder="F.eks. Lillehammer", key="pl_start")
-                ttil = cst2.text_input("Til (destinasjon, valgfritt)", placeholder="F.eks. Oslo",
-                                       key="pl_til",
-                                       help="Fyll ut for å besøke bedrifter LANGS veien fra Fra "
-                                            "til Til. La stå tomt for å jobbe området rundt Fra.")
-                vias_txt = st.text_area("Mellomstopp underveis – ett sted per linje (valgfritt)",
-                                        key="pl_vias_txt", height=70,
-                                        placeholder="F.eks.\nGjøvik\nHamar",
-                                        help="Ruta går Fra → mellomstopp → Til, i rekkefølgen "
-                                             "du skriver.")
-                c1, c2, c3 = st.columns(3)
-                antall = c1.number_input("Antall besøk pr. dag", 1, 20, 6, 1, key="pl_antall",
-                                         help="Hvor mange bedrifter du vil besøke (spres jevnt "
-                                              "langs ruta).")
-                thours = c2.number_input("Timer pr. dag", 1.0, 12.0,
-                                         float(_settings.get("hours_per_day") or 7), 0.5,
-                                         key="pl_hours")
-                tvisit = c3.number_input("Snitt pr. besøk (min)", 10, 180,
-                                         int(_settings.get("avg_visit_minutes") or 60), 5,
-                                         key="pl_visit")
-                tall = st.checkbox("Velg alle bransjer", key="pl_all")
-                tcat = st.multiselect("Bransjer", _kat_present, default=[], key="pl_cat")
-                torg = st.radio("Selskapsform", ["AS + ENK", "Kun AS", "Kun ENK"],
-                                horizontal=True, key="pl_org")
-                c4, c5 = st.columns(2)
-                tmax = c4.slider("Maks avstand mellom besøk (km)", 10, 300, 120, 10, key="pl_max")
-                tdet = c5.slider("Maks omvei fra strekning (km)", 2, 60, 15, key="pl_det")
-                go = st.form_submit_button("🧭  Lag rute(r)", type="primary",
-                                           use_container_width=True)
-            if go:
-                valgte = _kat_present if tall else tcat
-                if not valgte:
-                    st.warning("Velg minst én bransje – eller huk av «Velg alle bransjer».")
-                else:
-                    vias = [v.strip() for v in (vias_txt or "").splitlines() if v.strip()]
-                    status, msg = plan_trip(tstart, ttil, vias, fr, to, thours, tvisit,
-                                            valgte, torg, tmax, tdet, n_visits=int(antall))
-                    if status == "ok":
-                        ss["sel_from"] = None
-                        ss["sel_to"] = None
-                        st.session_state["_toast"] = f"✅ {msg}"
-                        st.rerun()
-                    elif status == "tom":
-                        st.warning(msg)
-                    else:
-                        st.error(msg)
-    else:
-        st.info("Klikk en dato i kalenderen (og evt. en til-dato) for å planlegge en rute.")
+            elif status == "tom":
+                st.warning(msg)
+            else:
+                st.error(msg)
 
     st.divider()
     st.markdown("#### Kommende ruter")
