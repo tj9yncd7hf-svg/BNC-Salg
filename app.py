@@ -179,24 +179,34 @@ def month_key(d=None):
     return (d or date.today()).strftime("%Y-%m")
 
 
+def _place_q(p):
+    """Veipunkt som «Navn, adresse, postnr poststed» – gir Google riktig bedrift.
+    (Rå koordinater snapper til nærmeste kjente sted, ofte feil nabo-bedrift.)"""
+    omr = f"{p.get('postnr','')} {p.get('poststed','')}".strip()
+    parts = [p.get("navn", ""), p.get("adresse", ""), omr]
+    q = ", ".join(x for x in parts if x)
+    return q or f"{p.get('lat')},{p.get('lon')}"
+
+
 def gmaps_route_url(start, stops):
     """Google Maps-rute: start → alle stopp i rekkefølge (åpnes i app på mobil)."""
     if not stops:
         return None
-    origin = f"{start['lat']},{start['lon']}"
-    dest = f"{stops[-1]['lat']},{stops[-1]['lon']}"
+    enc = urllib.parse.quote
+    origin = start.get("label") or f"{start['lat']},{start['lon']}"
+    dest = _place_q(stops[-1])
     mids = stops[:-1][:9]  # Google tillater opptil 9 mellomstopp i denne URL-en
-    url = (f"https://www.google.com/maps/dir/?api=1&origin={origin}"
-           f"&destination={dest}&travelmode=driving")
+    url = (f"https://www.google.com/maps/dir/?api=1&origin={enc(origin)}"
+           f"&destination={enc(dest)}&travelmode=driving")
     if mids:
-        url += "&waypoints=" + "%7C".join(f"{p['lat']},{p['lon']}" for p in mids)
+        url += "&waypoints=" + "%7C".join(enc(_place_q(p)) for p in mids)
     return url
 
 
 def gmaps_dest_url(p):
-    """Google Maps-navigasjon til ett stopp."""
+    """Google Maps-navigasjon til ett stopp (navn + adresse)."""
     return (f"https://www.google.com/maps/dir/?api=1"
-            f"&destination={p['lat']},{p['lon']}&travelmode=driving")
+            f"&destination={urllib.parse.quote(_place_q(p))}&travelmode=driving")
 
 
 def visited_orgnr_this_month(email):
