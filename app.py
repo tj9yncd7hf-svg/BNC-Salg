@@ -14,7 +14,6 @@ import urllib.parse
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-import pandas as pd
 import requests
 import streamlit as st
 
@@ -543,36 +542,34 @@ def plan_route_from(start_txt, dest_txt, hours, visit_min, valgte, orgvalg, maxk
     return {"lat": lat, "lon": lon, "label": label}, res
 
 
-def plan_trip(start_txt, stops, start_date, hours, visit_min, valgte, orgvalg, maxkm, detour):
-    """Fler-dagers tur: deler reisen (start → stoppestedene) i geografiske dags-
-    vinduer, og legger ~én dags besøk i hvert vindu så turen beveger seg fremover.
-    stops = liste av (sted-tekst, måldato). Returnerer (status, melding)."""
+def plan_trip(start_txt, waypoints, start_date, end_date, hours, visit_min, valgte, orgvalg, maxkm, detour):
+    """Fler-dagers tur: Kim velger periode (fra–til) + stoppesteder i rekkefølge.
+    Appen deler reisen (start → stoppestedene) i geografiske dagsvinduer, ett pr.
+    hverdag i perioden, så turen beveger seg fremover. Returnerer (status, melding)."""
     slat, slon, slabel = geocode(start_txt) if start_txt else (None, None, start_txt)
     if not slat:
         return ("feil", "Fant ikke startadressen. Prøv «gate nr, sted» eller et stedsnavn.")
-    milestones = []
-    for lbl, dto in stops:
+    wps = []
+    for lbl in waypoints:
         la, lo, _l = geocode(lbl)
         if la:
-            milestones.append({"label": lbl, "lat": la, "lon": lo, "date": dto})
-    if not milestones:
+            wps.append((la, lo))
+    if not wps:
         return ("feil", "Fant ingen av stoppestedene. Sjekk adressene.")
-    milestones.sort(key=lambda x: x["date"])
-    last_date = milestones[-1]["date"]
-    if last_date < start_date:
-        return ("feil", "Måldatoene må være på eller etter startdatoen.")
+    if end_date < start_date:
+        return ("feil", "Til-datoen må være på eller etter fra-datoen.")
 
     weekdays = []
     d = start_date
-    while d <= last_date and len(weekdays) < 60:
+    while d <= end_date and len(weekdays) < 60:
         if d.weekday() < 5:
             weekdays.append(d)
         d += timedelta(days=1)
     if not weekdays:
-        return ("feil", "Ingen hverdager i perioden. Velg et større datospenn.")
+        return ("feil", "Ingen hverdager i perioden. Velg et datospenn med hverdager.")
     D = len(weekdays)
 
-    poly = [(slat, slon)] + [(m["lat"], m["lon"]) for m in milestones]
+    poly = [(slat, slon)] + wps
     seg = [routing.haversine_km(poly[i][0], poly[i][1], poly[i + 1][0], poly[i + 1][1])
            for i in range(len(poly) - 1)]
     cum0 = [0.0]
@@ -894,23 +891,33 @@ if nav == "Planlegging":
     today = date.today()
 
     with st.expander("🧳 Planlegg tur (flere dager)"):
-        st.caption("Legg inn startadresse + stoppestedene du skal innom med måldato "
-                   "(f.eks. Oslo onsdag, Sandefjord fredag). Appen fordeler besøk utover "
-                   "dagene langs ruta, og starter hver dag der forrige sluttet.")
+        st.caption("Velg periode (fra–til) og legg inn stoppestedene du skal innom i "
+                   "rekkefølge (f.eks. Lillehammer → Oslo → Sandefjord). Appen fordeler "
+                   "besøkene utover hverdagene i perioden, så turen beveger seg fremover "
+                   "langs ruta.")
         tstart = st.text_input("Startadresse", value=_settings.get("start_label", ""),
                                placeholder="F.eks. Lillehammer", key="trip_start")
-        tdate = st.date_input("Startdato", value=today, min_value=today, key="trip_date")
-        st.markdown("**Stoppesteder (i rekkefølge)**")
-        base_df = pd.DataFrame([
-            {"Sted": "", "Dato": today + timedelta(days=2)},
-            {"Sted": "", "Dato": today + timedelta(days=4)},
-        ])
-        edited = st.data_editor(
-            base_df, num_rows="dynamic", hide_index=True, key="trip_stops",
-            column_config={
-                "Sted": st.column_config.TextColumn("Sted", help="By/adresse, f.eks. Oslo"),
-                "Dato": st.column_config.DateColumn("Måldato", min_value=today,
-                                                    format="DD.MM.YYYY")})
+        trange = st.date_input("Periode (fra – til)", value=(today, today + timedelta(days=3)),
+                               min_value=today, format="DD.MM.YYYY", key="trip_range")
+        st.markdown("**Stoppesteder underveis (i rekkefølge)**")
+        if "trip_stops" not in st.session_state:
+            st.session_state["trip_stops"] = [1]
+            st.session_state["trip_next"] = 2
+        for n, sid in enumerate(st.session_state["trip_stops"]):
+            rc = st.columns([6, 1])
+            rc[0].text_input(f"Stoppested {n + 1}", key=f"trip_sted_{sid}",
+                             placeholder="F.eks. Oslo", label_visibility="collapsed")
+            if rc[1].button("🗑️", key=f"trip_del_{sid}", use_container_width=True,
+                            help="Fjern stoppested"):
+                st.session_state["trip_stops"].remove(sid)
+                st.session_state.pop(f"trip_sted_{sid}", None)
+                st.rerun()
+        if st.button("➕ Legg til stoppested", use_container_width=True):
+            st.session_state["trip_stops"].append(st.session_state["trip_next"])
+            st.session_state["trip_next"] += 1
+            st.rerun()
+
+        st.write("")
         c1, c2 = st.columns(2)
         thours = c1.number_input("Timer pr. dag", 1.0, 12.0,
                                  float(_settings.get("hours_per_day") or 7), 0.5, key="trip_hours")
@@ -924,28 +931,19 @@ if nav == "Planlegging":
         tdet = c4.slider("Maks omvei fra strekning (km)", 2, 60, 15, key="trip_det")
         if st.button("🧳  Planlegg hele turen", type="primary", key="trip_go"):
             valgte = _kat_present if tall else tcat
-
-            def _as_date(x):
-                if isinstance(x, datetime):
-                    return x.date()
-                if isinstance(x, date):
-                    return x
-                try:
-                    return datetime.fromisoformat(str(x)[:10]).date()
-                except Exception:
-                    return None
-            stops = []
-            for row in edited.to_dict("records"):
-                sted = str(row.get("Sted") or "").strip()
-                dto = _as_date(row.get("Dato"))
-                if sted and dto:
-                    stops.append((sted, dto))
+            har_periode = isinstance(trange, (list, tuple)) and len(trange) == 2
+            waypoints = [str(st.session_state.get(f"trip_sted_{sid}") or "").strip()
+                         for sid in st.session_state["trip_stops"]]
+            waypoints = [w for w in waypoints if w]
             if not valgte:
                 st.warning("Velg minst én bransje – eller huk av «Velg alle bransjer».")
-            elif not stops:
-                st.warning("Legg inn minst ett stoppested med dato.")
+            elif not waypoints:
+                st.warning("Legg inn minst ett stoppested.")
+            elif not har_periode:
+                st.warning("Velg både fra- og til-dato i perioden.")
             else:
-                status, msg = plan_trip(tstart, stops, tdate, thours, tvisit, valgte, torg, tmax, tdet)
+                status, msg = plan_trip(tstart, waypoints, trange[0], trange[1],
+                                        thours, tvisit, valgte, torg, tmax, tdet)
                 if status == "ok":
                     st.success(f"✅ {msg} Se kalenderen og «Kommende ruter» under.")
                     st.rerun()
