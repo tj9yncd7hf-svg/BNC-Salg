@@ -5,6 +5,7 @@ drop-in-kandidater, registrerer besøk (i et dialogvindu), kan ekskludere
 irrelevante bedrifter, og lagre ruter til datoer (kalender). Rapport + «takk for
 praten» + ukesoppsummering går via e-postkøen. Admin styrer brukere og e-postinnhold.
 """
+import calendar as _cal
 import hashlib
 import json
 import os
@@ -459,9 +460,9 @@ if st.session_state.get("_toast"):
 
 
 # ------------------------------------------------------------- sidemeny -------
-USER_PAGES = ["Min dag", "Besøk", "Planlagt", "Historikk", "Innstillinger"]
+USER_PAGES = ["Min dag", "Drop-in", "Planlegging", "Historikk", "Innstillinger"]
 ADMIN_PAGES = ["Brukere", "E-postinnhold"]
-PAGE_ICONS = {"Min dag": "map", "Besøk": "clipboard-check", "Planlagt": "calendar-week",
+PAGE_ICONS = {"Min dag": "map", "Drop-in": "clipboard-check", "Planlegging": "calendar-week",
               "Historikk": "clock-history", "Innstillinger": "gear",
               "Brukere": "people", "E-postinnhold": "envelope"}
 pages = USER_PAGES + (ADMIN_PAGES if is_admin else [])
@@ -509,6 +510,35 @@ def page_header(title, sub):
     st.markdown(f"## {title}")
     st.markdown(f"<div class='bnc-sub'>{sub}</div>", unsafe_allow_html=True)
     st.write("")
+
+
+UKEDAGER = ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"]
+_kat_present = [k for k in KATEGORIER if any(c.get("kategori") == k for c in companies)]
+
+
+def plan_route_from(start_txt, dest_txt, hours, visit_min, valgte, orgvalg, maxkm, detour):
+    """Geokod + filtrer + plan_route. Returnerer (start, route, meta) eller (None, msg)."""
+    lat, lon, label = geocode(start_txt) if start_txt else (None, None, start_txt)
+    if not lat:
+        return None, "Fant ikke startadressen. Prøv «gate nr, sted» eller et stedsnavn."
+    dlat = dlon = None
+    if dest_txt and dest_txt.strip():
+        dlat, dlon, _dl = geocode(dest_txt)
+    visited = visited_orgnr_this_month(email)
+    excl = excluded_orgnr(email)
+    _off = {"Kun AS": "AS", "Kun ENK": "ENK"}.get(orgvalg)
+    cands = [c for c in companies
+             if c.get("kategori") in valgte
+             and str(c.get("orgnr")) not in visited
+             and str(c.get("orgnr")) not in excl
+             and (_off is None or c.get("orgform") == _off)]
+    if dlat:
+        base = routing.haversine_km(lat, lon, dlat, dlon)
+        cands = [c for c in cands
+                 if (routing.haversine_km(lat, lon, c["lat"], c["lon"])
+                     + routing.haversine_km(c["lat"], c["lon"], dlat, dlon) - base) <= detour]
+    res = routing.plan_route(lat, lon, cands, hours, visit_minutes=visit_min, max_leg_km=maxkm)
+    return {"lat": lat, "lon": lon, "label": label}, res
 
 
 # -------------------------------------------------- dialog: registrer besøk ---
@@ -594,86 +624,73 @@ def route_map(start, route):
         st.map([{"lat": p["lat"], "lon": p["lon"]} for p in route])
 
 
-# ============================================================== MIN DAG =======
-if nav == "Min dag":
-    page_header("Min dag", "Planlegg ruta, naviger og registrer besøk")
-    _def_label = _settings.get("start_label") or ""
-    _kat_present = [k for k in KATEGORIER if any(c.get("kategori") == k for c in companies)]
-
-    # Last dagens planlagte rute automatisk (hvis ingen aktiv rute).
-    if not st.session_state.get("route"):
-        _plan = get_plan(email, date.today())
-        if _plan and _plan.get("companies"):
-            st.session_state["route"] = _plan["companies"]
-            st.session_state["route_start"] = _plan.get("start")
-            st.session_state["route_meta"] = _plan.get("meta") or {}
-            st.session_state["_from_plan"] = True
-
-    with st.container(border=True):
-        with st.form("plan"):
-            c1, c2, c3 = st.columns([2, 1, 1])
-            start_txt = c1.text_input("Startposisjon", value=_def_label,
-                                      placeholder="Adresse eller sted, f.eks. Molde lufthavn")
-            hours = c2.number_input("Timer på veien", 1.0, 12.0,
-                                    float(_settings.get("hours_per_day") or 7), 0.5)
-            visit_min = c3.number_input("Snitt pr. besøk (min)", 10, 180,
-                                        int(_settings.get("avg_visit_minutes") or 60), 5)
-            dest_txt = st.text_input("Til (valgfritt – reiser du et sted?)",
-                                     placeholder="F.eks. Sarpsborg – viser bedrifter langs ruta dit")
-            velg_alle = st.checkbox("Velg alle bransjer")
-            valgte_cat = st.multiselect(
-                "Bransjer", _kat_present, default=[],
-                help="La stå tom og huk av «Velg alle bransjer», eller velg kun de du vil besøke.")
-            orgvalg = st.radio("Selskapsform", ["AS + ENK", "Kun AS", "Kun ENK"], horizontal=True)
-            cc1, cc2 = st.columns(2)
-            maxkm = cc1.slider("Maks avstand mellom besøk (km)", 10, 300, 120, 10)
-            detour = cc2.slider("Maks omvei fra strekning (km)", 2, 50, 10,
-                                help="Brukes når «Til» er fylt ut – hvor langt fra kjøreruta et stopp kan ligge.")
-            planlegg = st.form_submit_button("🧭  Foreslå rute", type="primary",
-                                             use_container_width=True)
-
-    if planlegg:
+@st.dialog("Planlegg rute")
+def plan_dialog(d):
+    try:
+        wd = UKEDAGER[d.weekday()].capitalize()
+    except Exception:
+        wd = ""
+    st.markdown(f"**{wd} {d.strftime('%d.%m.%Y')}**")
+    existing = get_plan(email, d)
+    if existing and existing.get("companies"):
+        st.success(f"📅 {len(existing['companies'])} besøk er planlagt denne dagen.")
+        if st.button("🗑️ Slett denne ruten", use_container_width=True):
+            try:
+                delete_plan(email, d.isoformat())
+                st.session_state["_toast"] = "Planlagt rute slettet."
+                st.rerun()
+            except Exception as exc:
+                st.error(f"{exc}")
+        st.divider()
+        st.caption("Planlegg på nytt under (erstatter ruten):")
+    start_txt = st.text_input("Fra (startadresse)", value=_settings.get("start_label", ""),
+                              placeholder="Adresse eller sted")
+    dest_txt = st.text_input("Til (valgfritt)", placeholder="F.eks. Sarpsborg – drop-in langs ruta")
+    cc1, cc2 = st.columns(2)
+    hours = cc1.number_input("Timer på veien", 1.0, 12.0, float(_settings.get("hours_per_day") or 7), 0.5)
+    visit_min = cc2.number_input("Snitt pr. besøk (min)", 10, 180, int(_settings.get("avg_visit_minutes") or 60), 5)
+    velg_alle = st.checkbox("Velg alle bransjer")
+    valgte_cat = st.multiselect("Bransjer", _kat_present, default=[])
+    orgvalg = st.radio("Selskapsform", ["AS + ENK", "Kun AS", "Kun ENK"], horizontal=True)
+    cc3, cc4 = st.columns(2)
+    maxkm = cc3.slider("Maks avstand mellom besøk (km)", 10, 300, 120, 10)
+    detour = cc4.slider("Maks omvei fra strekning (km)", 2, 50, 10)
+    if st.button("🧭  Foreslå & lagre rute", type="primary", use_container_width=True):
         valgte = _kat_present if velg_alle else valgte_cat
         if not valgte:
             st.warning("Velg minst én bransje – eller huk av «Velg alle bransjer».")
         else:
-            lat, lon, label = geocode(start_txt) if start_txt else (None, None, start_txt)
-            if not lat:
-                st.error("Fant ikke startposisjonen. Prøv «gate nr, sted» eller et stedsnavn.")
+            start, res = plan_route_from(start_txt, dest_txt, hours, visit_min,
+                                         valgte, orgvalg, maxkm, detour)
+            if start is None:
+                st.error(res)
+            elif not res["route"]:
+                st.warning("Fant ingen bedrifter med disse valgene. Prøv flere bransjer eller større omvei.")
             else:
-                dlat = dlon = None
-                if dest_txt.strip():
-                    dlat, dlon, _dlabel = geocode(dest_txt)
-                    if not dlat:
-                        st.warning("Fant ikke destinasjonen – planlegger radius fra start i stedet.")
-                visited = visited_orgnr_this_month(email)
-                excl = excluded_orgnr(email)
-                _off = {"Kun AS": "AS", "Kun ENK": "ENK"}.get(orgvalg)
-                cands = [c for c in companies
-                         if c.get("kategori") in valgte
-                         and str(c.get("orgnr")) not in visited
-                         and str(c.get("orgnr")) not in excl
-                         and (_off is None or c.get("orgform") == _off)]
-                if dlat:
-                    base = routing.haversine_km(lat, lon, dlat, dlon)
-                    cands = [c for c in cands
-                             if (routing.haversine_km(lat, lon, c["lat"], c["lon"])
-                                 + routing.haversine_km(c["lat"], c["lon"], dlat, dlon)
-                                 - base) <= detour]
-                res = routing.plan_route(lat, lon, cands, hours,
-                                         visit_minutes=visit_min, max_leg_km=maxkm)
-                st.session_state["route"] = res["route"]
-                st.session_state["route_start"] = {"lat": lat, "lon": lon, "label": label}
-                st.session_state["route_meta"] = res
-                st.session_state.pop("_from_plan", None)
+                try:
+                    save_plan(email, d, start, res["route"], {
+                        "total_min": res["total_min"], "total_km": res["total_km"],
+                        "n_candidates": res["n_candidates"]})
+                    st.session_state["_toast"] = f"✅ Rute lagret til {d.isoformat()} ({len(res['route'])} besøk)."
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Kunne ikke lagre: {exc}")
 
-    route = st.session_state.get("route") or []
-    start = st.session_state.get("route_start")
-    meta = st.session_state.get("route_meta") or {}
-    if route and start:
-        if st.session_state.get("_from_plan"):
-            st.info("📅 Dette er din planlagte rute for i dag. Trykk «Foreslå rute» for å lage en ny.")
-        st.write("")
+
+# ============================================================== MIN DAG =======
+if nav == "Min dag":
+    today = date.today()
+    wd = UKEDAGER[today.weekday()].capitalize()
+    page_header("Min dag", f"{wd} {today.strftime('%d.%m.%Y')} – dagens planlagte rute")
+    plan = get_plan(email, today)
+    route = (plan or {}).get("companies") or []
+    start = (plan or {}).get("start")
+    meta = (plan or {}).get("meta") or {}
+
+    if not route:
+        st.info("📅 Ingen planlagt rute for i dag. Gå til **Planlegging** for å sette opp ruter "
+                "– eller bruk **Drop-in** for et besøk på sparket.")
+    else:
         h = int(meta.get("total_min", 0)) // 60
         m = int(meta.get("total_min", 0)) % 60
         day_co2 = co2_kg(meta.get("total_km", 0), _settings)
@@ -686,24 +703,12 @@ if nav == "Min dag":
                     f"<div class='v'>{h} t {m} <small>min</small></div></div>", unsafe_allow_html=True)
         s4.markdown(f"<div class='bnc-stat'><div class='k'>Klimaavtrykk</div>"
                     f"<div class='v'>{day_co2} <small>kg CO₂e</small></div></div>", unsafe_allow_html=True)
-        st.caption(f"Av {meta.get('n_candidates', 0)} aktuelle bedrifter. CO₂e med "
-                   f"{int(co2_factor(_settings))} g/km (endres under Innstillinger).")
-
-        with st.expander("📅 Lagre denne ruta til en dato"):
-            pdato = st.date_input("Dato", value=date.today() + timedelta(days=3),
-                                  min_value=date.today())
-            if st.button("Lagre rute til valgt dato", type="primary"):
-                try:
-                    save_plan(email, pdato, start, route, meta)
-                    st.success(f"✅ Rute lagret til {pdato.isoformat()} (se «Planlagt»).")
-                except Exception as exc:
-                    st.error(f"Kunne ikke lagre: {exc}")
         st.write("")
 
         show_map = st.checkbox("Vis kart", value=True)
         list_col, map_col = st.columns([5, 6]) if show_map else (st.container(), None)
         with list_col:
-            g_url = gmaps_route_url(start, route)
+            g_url = gmaps_route_url(start, route) if start else None
             if g_url:
                 st.link_button("🧭  Åpne hele ruta i Google Maps", g_url, use_container_width=True)
             st.markdown("#### Dagens besøk")
@@ -716,7 +721,7 @@ if nav == "Min dag":
                 badge = ("<span class='bnc-badge b-ok'>✓ Besøkt</span>" if done
                          else f"<span class='bnc-badge'>{s.get('kategori', s.get('bransje_kode',''))}</span>")
                 st.markdown(
-                    f"<div class='bnc-stop{' done' if done else ''}'><b>{s['stop']}. {s.get('navn','')}</b><br>"
+                    f"<div class='bnc-stop{' done' if done else ''}'><b>{s.get('stop','')}. {s.get('navn','')}</b><br>"
                     f"{badge}{_ofh} {s.get('adresse','')}, {s.get('postnr','')} {s.get('poststed','')}<br>"
                     f"<small>+{s.get('leg_km')} km / {s.get('leg_min')} min · kum. {s.get('cum_min')} min</small></div>",
                     unsafe_allow_html=True)
@@ -737,22 +742,23 @@ if nav == "Min dag":
                                  use_container_width=True):
                         try:
                             exclude_company(email, s)
-                            st.session_state["route"] = [x for x in route if str(x.get("orgnr")) != org]
+                            rest = [x for x in route if str(x.get("orgnr")) != org]
+                            if rest:
+                                save_plan(email, today, start, rest, meta)
+                            else:
+                                delete_plan(email, today.isoformat())
                             st.session_state["_toast"] = f"{s.get('navn','')} skjult fra forslag."
                             st.rerun()
                         except Exception as exc:
                             st.error(f"{exc}")
-        if show_map and map_col is not None:
+        if show_map and map_col is not None and start:
             with map_col:
                 route_map(start, route)
-    else:
-        st.info("Sett startposisjon, timer og bransjer over, og trykk **Foreslå rute**. "
-                "Fyll «Til» hvis du vil ha drop-in-besøk langs en strekning.")
 
 
-# ================================================================ BESØK =======
-if nav == "Besøk":
-    page_header("Registrer besøk", "Søk opp en bedrift (drop-in) og registrer")
+# =============================================================== DROP-IN ======
+if nav == "Drop-in":
+    page_header("Drop-in", "Søk opp en bedrift og registrer et besøk på sparket")
     q = st.text_input("Søk bedrift", placeholder="Skriv navn …")
     if q:
         hits = [c for c in companies if q.lower() in str(c.get("navn", "")).lower()][:25]
@@ -769,50 +775,85 @@ if nav == "Besøk":
         st.info("Søk opp en bedrift for å registrere et drop-in-besøk.")
 
 
-# =============================================================== PLANLAGT ======
-if nav == "Planlagt":
-    page_header("Planlagt", "Ruter du har lagt opp fremover")
-    plans = list_plans(email)
-    if not plans:
-        st.info("Ingen planlagte ruter. Lag en rute på «Min dag» og trykk "
-                "«Lagre denne ruta til en dato».")
-    for p in plans:
+# ============================================================ PLANLEGGING ======
+if nav == "Planlegging":
+    page_header("Planlegging", "Klikk en dato for å planlegge en rute. "
+                "Dagens rute vises automatisk i «Min dag».")
+    today = date.today()
+    if "cal_ym" not in st.session_state:
+        st.session_state["cal_ym"] = (today.year, today.month)
+    cy, cm = st.session_state["cal_ym"]
+    try:
+        allplans = sb_get("planned_routes", "plan_date,companies",
+                          {"user_email": f"eq.{email}", "order": "plan_date.asc"})
+    except Exception:
+        allplans = []
+    plandates = {p["plan_date"]: len(p.get("companies") or []) for p in allplans}
+    MND = ["januar", "februar", "mars", "april", "mai", "juni", "juli", "august",
+           "september", "oktober", "november", "desember"]
+
+    nc1, nc2, nc3 = st.columns([1, 3, 1])
+    if nc1.button("‹ Forrige", use_container_width=True):
+        st.session_state["cal_ym"] = (cy - 1, 12) if cm == 1 else (cy, cm - 1)
+        st.rerun()
+    nc2.markdown(f"<h3 style='text-align:center;margin:4px 0'>{MND[cm-1].capitalize()} {cy}</h3>",
+                 unsafe_allow_html=True)
+    if nc3.button("Neste ›", use_container_width=True):
+        st.session_state["cal_ym"] = (cy + 1, 1) if cm == 12 else (cy, cm + 1)
+        st.rerun()
+
+    hdr = st.columns(7)
+    for i, wd in enumerate(["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"]):
+        hdr[i].markdown(f"<div style='text-align:center;color:#6a7488;font-size:12px;"
+                        f"font-weight:600'>{wd}</div>", unsafe_allow_html=True)
+    for week in _cal.Calendar(firstweekday=0).monthdatescalendar(cy, cm):
+        cols = st.columns(7)
+        for i, d in enumerate(week):
+            with cols[i]:
+                if d.month != cm:
+                    st.markdown(f"<div style='text-align:center;color:#c5ccd6;padding:9px 0'>"
+                                f"{d.day}</div>", unsafe_allow_html=True)
+                else:
+                    cnt = plandates.get(d.isoformat())
+                    lbl = f"{d.day}" + (f"  ·{cnt}📍" if cnt else "")
+                    if st.button(lbl, key=f"cal_{d.isoformat()}", use_container_width=True,
+                                 type=("primary" if d == today else "secondary")):
+                        plan_dialog(d)
+    st.caption("📍 = dag med planlagt rute. Blå dato = i dag.")
+
+    st.divider()
+    st.markdown("#### Kommende ruter")
+    upcoming = [p for p in allplans if p["plan_date"] >= today.isoformat()]
+    if not upcoming:
+        st.caption("Ingen kommende ruter ennå – klikk en dato i kalenderen for å lage en.")
+    for p in upcoming:
         d = p["plan_date"]
         comps = p.get("companies") or []
         try:
             dt = datetime.fromisoformat(d).date()
-            ukedag = ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"][dt.weekday()]
-            tittel = f"📅 {ukedag.capitalize()} {dt.strftime('%d.%m.%Y')} — {len(comps)} besøk"
+            tittel = f"📅 {UKEDAGER[dt.weekday()].capitalize()} {dt.strftime('%d.%m.%Y')} — {len(comps)} besøk"
         except Exception:
-            tittel = f"📅 {d} — {len(comps)} besøk"
+            dt, tittel = None, f"📅 {d} — {len(comps)} besøk"
         with st.expander(tittel):
             for s in comps:
                 st.markdown(f"- **{s.get('stop','')}. {s.get('navn','')}** "
                             f"<span class='bnc-sub'>({s.get('poststed','')})</span>",
                             unsafe_allow_html=True)
-            b1, b2 = st.columns(2)
-            if b1.button("📍 Åpne i Min dag", key=f"open_{d}", use_container_width=True):
-                st.session_state["route"] = comps
-                st.session_state["route_start"] = p.get("start")
-                st.session_state["route_meta"] = p.get("meta") or {}
-                st.session_state["_from_plan"] = True
-                st.session_state["_goto"] = "Min dag"
-                st.rerun()
-            if b2.button("🗑️ Slett", key=f"delp_{d}", use_container_width=True):
-                try:
-                    delete_plan(email, d)
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"{exc}")
+            if dt and st.button("✏️ Endre / slett", key=f"edit_{d}"):
+                plan_dialog(dt)
 
 
 # ============================================================= HISTORIKK ======
 if nav == "Historikk":
-    page_header("Historikk", f"Dine besøk i {month_key()}")
+    page_header("Historikk", "Dine besøk og klimaavtrykk")
+    periode = st.radio("Periode", ["Denne måneden", "Hittil i år", "Alt"], horizontal=True)
+    params = {"user_email": f"eq.{email}", "order": "visited_on.desc"}
+    if periode == "Denne måneden":
+        params["month_key"] = f"eq.{month_key()}"
+    elif periode == "Hittil i år":
+        params["visited_on"] = f"gte.{date.today().year}-01-01"
     try:
-        rows = sb_get("visits", "*",
-                      {"user_email": f"eq.{email}", "month_key": f"eq.{month_key()}",
-                       "order": "visited_on.desc"})
+        rows = sb_get("visits", "*", params)
     except Exception as exc:
         rows = []
         st.error(f"Kunne ikke hente: {exc}")
@@ -847,7 +888,7 @@ if nav == "Historikk":
                 except Exception as exc:
                     st.error(f"{exc}")
     if not rows:
-        st.info("Ingen besøk registrert denne måneden ennå.")
+        st.info(f"Ingen besøk i perioden «{periode}».")
 
 
 # =========================================================== INNSTILLINGER ====
