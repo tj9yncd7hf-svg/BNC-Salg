@@ -350,10 +350,14 @@ def excluded_orgnr(email):
 
 
 def exclude_company(email, c):
-    sb_upsert("excluded", {"user_email": email, "orgnr": str(c.get("orgnr")),
-                           "navn": c.get("navn", ""),
-                           "created_at": datetime.now(timezone.utc).isoformat()},
-              "user_email,orgnr")
+    # Unngår on_conflict-upsert: tabellen kan mangle sammensatt PK (gir 400).
+    org = str(c.get("orgnr"))
+    try:
+        if sb_get("excluded", "orgnr", {"user_email": f"eq.{email}", "orgnr": f"eq.{org}"}):
+            return
+    except Exception:
+        pass
+    sb_insert("excluded", {"user_email": email, "orgnr": org, "navn": c.get("navn", "")})
 
 
 def unexclude(email, orgnr):
@@ -739,13 +743,16 @@ def register_dialog(company):
                 f"<span class='bnc-sub'>{company.get('adresse','')}, "
                 f"{company.get('postnr','')} {company.get('poststed','')}</span>",
                 unsafe_allow_html=True)
-    outcome = st.selectbox("Besøksresultat", ["Interessert", "Vil tenke", "Ikke interessert",
-                                              "Ikke til stede", "Solgt", "Annet"])
-    report = st.text_area("Besøksrapport", placeholder="Hva skjedde på besøket …", height=130)
-    contact = st.text_input("Kundens e-post", value=company.get("epost", ""))
-    send_thanks = st.checkbox("Send «takk for praten» (går ut 2 virkedager etter)",
-                              value=bool(company.get("epost")))
-    if st.button("💾  Lagre besøk og send rapport", type="primary", use_container_width=True):
+    with st.form(f"reg_{company.get('orgnr')}"):
+        outcome = st.selectbox("Besøksresultat", ["Interessert", "Vil tenke", "Ikke interessert",
+                                                  "Ikke til stede", "Solgt", "Annet"])
+        report = st.text_area("Besøksrapport", placeholder="Hva skjedde på besøket …", height=130)
+        contact = st.text_input("Kundens e-post", value=company.get("epost", ""))
+        send_thanks = st.checkbox("Send «takk for praten» (går ut 2 virkedager etter)",
+                                  value=bool(company.get("epost")))
+        lagre_besok = st.form_submit_button("💾  Lagre besøk og send rapport", type="primary",
+                                            use_container_width=True)
+    if lagre_besok:
         try:
             today = date.today()
             leg_km = round(float(company.get("leg_km") or 0), 1)
@@ -846,8 +853,12 @@ function ic(l,c){return L.divIcon({className:'',iconSize:[24,24],iconAnchor:[12,
  +'border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.4)">'+l+'</div>'});}
 pts.forEach(function(p){var c=p.start?'#1f9d5b':line;
  L.marker([p.lat,p.lon],{icon:ic(p.label,c)}).addTo(map).bindTooltip(p.label+'. '+p.navn);});
-map.fitBounds(ll,{padding:[30,30]});
-setTimeout(function(){map.invalidateSize();},250);
+var b=L.latLngBounds(ll);
+function fit(){if(ll.length>1){map.fitBounds(b,{padding:[30,30],maxZoom:13});}
+ else{map.setView(ll[0],12);}}
+fit();
+setTimeout(function(){map.invalidateSize();fit();},300);
+setTimeout(function(){map.invalidateSize();fit();},800);
 </script></body></html>"""
     html = (tmpl.replace("__DATA__", json.dumps(pts))
                 .replace("__LINE__", line_color)
@@ -1025,7 +1036,11 @@ if nav == "Min dag":
 # =============================================================== DROP-IN ======
 if nav == "Drop-in":
     page_header("Drop-in", "Søk opp en bedrift og registrer et besøk på sparket")
-    q = st.text_input("Søk bedrift (navn eller org.nr)", placeholder="Skriv navn eller org.nr …")
+    with st.form("dropin_sok"):
+        sc1, sc2 = st.columns([5, 1])
+        q = sc1.text_input("Søk bedrift (navn eller org.nr)",
+                           placeholder="Skriv navn eller org.nr …", label_visibility="collapsed")
+        sc2.form_submit_button("🔍 Søk", use_container_width=True)
     if q:
         ql = q.strip().lower()
         qd = "".join(ch for ch in q if ch.isdigit())
@@ -1120,57 +1135,55 @@ if nav == "Planlegging":
                 ss["sel_from"] = None
                 ss["sel_to"] = None
                 st.rerun()
-            cst1, cst2 = st.columns(2)
-            tstart = cst1.text_input("Fra (startadresse)", value=_settings.get("start_label", ""),
-                                     placeholder="F.eks. Lillehammer", key="pl_start")
-            ttil = cst2.text_input("Til (destinasjon, valgfritt)", placeholder="F.eks. Oslo",
-                                   key="pl_til",
-                                   help="Fyll ut for å besøke bedrifter LANGS veien fra Fra til Til. "
-                                        "La stå tomt for å jobbe området rundt Fra.")
-            # Valgfrie mellomstopp (underveis fra Fra til Til).
-            if "pl_vias" not in ss:
-                ss["pl_vias"] = []
-            if ss["pl_vias"]:
-                st.caption("Mellomstopp underveis (i rekkefølge):")
-            for i in range(len(ss["pl_vias"])):
-                vc = st.columns([6, 1])
-                ss["pl_vias"][i] = vc[0].text_input(
-                    f"Mellomstopp {i + 1}", value=ss["pl_vias"][i],
-                    placeholder="F.eks. Gjøvik", key=f"pl_via_{i}", label_visibility="collapsed")
-                if vc[1].button("✕", key=f"pl_via_del_{i}", use_container_width=True):
-                    ss["pl_vias"].pop(i)
-                    st.rerun()
-            if st.button("➕ Legg til mellomstopp", key="pl_via_add"):
-                ss["pl_vias"].append("")
-                st.rerun()
-            c1, c2, c3 = st.columns(3)
-            antall = c1.number_input("Antall besøk pr. dag", 1, 20, 6, 1, key="pl_antall",
-                                     help="Hvor mange bedrifter du vil besøke (spres jevnt langs ruta).")
-            thours = c2.number_input("Timer pr. dag", 1.0, 12.0,
-                                     float(_settings.get("hours_per_day") or 7), 0.5, key="pl_hours")
-            tvisit = c3.number_input("Snitt pr. besøk (min)", 10, 180,
-                                     int(_settings.get("avg_visit_minutes") or 60), 5, key="pl_visit")
-            tall = st.checkbox("Velg alle bransjer", key="pl_all")
-            tcat = st.multiselect("Bransjer", _kat_present, default=[], key="pl_cat")
-            torg = st.radio("Selskapsform", ["AS + ENK", "Kun AS", "Kun ENK"], horizontal=True, key="pl_org")
-            c4, c5 = st.columns(2)
-            tmax = c4.slider("Maks avstand mellom besøk (km)", 10, 300, 120, 10, key="pl_max")
-            tdet = c5.slider("Maks omvei fra strekning (km)", 2, 60, 15, key="pl_det")
-            if flerdag and ttil.strip():
-                st.caption(f"Strekningen {tstart or 'start'} → {ttil} fordeles på de "
-                           f"{(to - fr).days + 1} dagene i perioden.")
-            if st.button("🧭  Lag rute(r)", type="primary", key="pl_go"):
+            if flerdag:
+                st.caption(f"Flere dager ({(to - fr).days + 1}): har du fylt ut «Til», "
+                           "fordeles strekningen jevnt på hverdagene. Uten «Til» planlegges "
+                           "området rundt start hver dag.")
+            # Alt i ett skjema → ett trykk på mobil, uten å bekrefte hvert felt.
+            with st.form("pl_form"):
+                cst1, cst2 = st.columns(2)
+                tstart = cst1.text_input("Fra (startadresse)",
+                                         value=_settings.get("start_label", ""),
+                                         placeholder="F.eks. Lillehammer", key="pl_start")
+                ttil = cst2.text_input("Til (destinasjon, valgfritt)", placeholder="F.eks. Oslo",
+                                       key="pl_til",
+                                       help="Fyll ut for å besøke bedrifter LANGS veien fra Fra "
+                                            "til Til. La stå tomt for å jobbe området rundt Fra.")
+                vias_txt = st.text_area("Mellomstopp underveis – ett sted per linje (valgfritt)",
+                                        key="pl_vias_txt", height=70,
+                                        placeholder="F.eks.\nGjøvik\nHamar",
+                                        help="Ruta går Fra → mellomstopp → Til, i rekkefølgen "
+                                             "du skriver.")
+                c1, c2, c3 = st.columns(3)
+                antall = c1.number_input("Antall besøk pr. dag", 1, 20, 6, 1, key="pl_antall",
+                                         help="Hvor mange bedrifter du vil besøke (spres jevnt "
+                                              "langs ruta).")
+                thours = c2.number_input("Timer pr. dag", 1.0, 12.0,
+                                         float(_settings.get("hours_per_day") or 7), 0.5,
+                                         key="pl_hours")
+                tvisit = c3.number_input("Snitt pr. besøk (min)", 10, 180,
+                                         int(_settings.get("avg_visit_minutes") or 60), 5,
+                                         key="pl_visit")
+                tall = st.checkbox("Velg alle bransjer", key="pl_all")
+                tcat = st.multiselect("Bransjer", _kat_present, default=[], key="pl_cat")
+                torg = st.radio("Selskapsform", ["AS + ENK", "Kun AS", "Kun ENK"],
+                                horizontal=True, key="pl_org")
+                c4, c5 = st.columns(2)
+                tmax = c4.slider("Maks avstand mellom besøk (km)", 10, 300, 120, 10, key="pl_max")
+                tdet = c5.slider("Maks omvei fra strekning (km)", 2, 60, 15, key="pl_det")
+                go = st.form_submit_button("🧭  Lag rute(r)", type="primary",
+                                           use_container_width=True)
+            if go:
                 valgte = _kat_present if tall else tcat
                 if not valgte:
                     st.warning("Velg minst én bransje – eller huk av «Velg alle bransjer».")
                 else:
-                    vias = [v.strip() for v in ss.get("pl_vias", []) if v and v.strip()]
+                    vias = [v.strip() for v in (vias_txt or "").splitlines() if v.strip()]
                     status, msg = plan_trip(tstart, ttil, vias, fr, to, thours, tvisit,
                                             valgte, torg, tmax, tdet, n_visits=int(antall))
                     if status == "ok":
                         ss["sel_from"] = None
                         ss["sel_to"] = None
-                        ss["pl_vias"] = []
                         st.session_state["_toast"] = f"✅ {msg}"
                         st.rerun()
                     elif status == "tom":
