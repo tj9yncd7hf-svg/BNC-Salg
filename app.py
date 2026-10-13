@@ -455,9 +455,9 @@ if nav == "Min dag":
             valgte_cat = st.multiselect(
                 "Bransjer", _kat_present, default=[],
                 help="La stå tom og huk av «Velg alle bransjer», eller velg kun de du vil besøke.")
-            inkluder_enk = st.checkbox(
-                "Ta med enkeltpersonforetak (ENK)", value=True,
-                help="Av = kun aksjeselskap (AS). ENK er ofte små bilpleie-/verksted-aktører.")
+            orgvalg = st.radio(
+                "Selskapsform", ["AS + ENK", "Kun AS", "Kun ENK"], horizontal=True,
+                help="ENK = enkeltpersonforetak, ofte små bilpleie-/verksted-aktører.")
             maxkm = st.slider("Maks avstand mellom besøk (km)", 10, 300, 120, 10)
             planlegg = st.form_submit_button("🧭  Foreslå rute", type="primary",
                                              use_container_width=True)
@@ -474,9 +474,10 @@ if nav == "Min dag":
                 st.error("Fant ikke startposisjonen. Prøv «gate nr, sted».")
             else:
                 visited = visited_orgnr_this_month(email)
+                _off = {"Kun AS": "AS", "Kun ENK": "ENK"}.get(orgvalg)
                 cands = [c for c in companies
                          if c.get("kategori") in valgte and str(c.get("orgnr")) not in visited
-                         and (inkluder_enk or c.get("orgform") != "ENK")]
+                         and (_off is None or c.get("orgform") == _off)]
                 res = routing.plan_route(lat, lon, cands, hours,
                                          visit_minutes=visit_min, max_leg_km=maxkm)
                 st.session_state["route"] = res["route"]
