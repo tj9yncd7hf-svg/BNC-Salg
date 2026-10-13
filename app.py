@@ -815,6 +815,47 @@ def route_map(start, route):
         st.map([{"lat": p["lat"], "lon": p["lon"]} for p in route])
 
 
+def leaflet_route_html(start, route, height=360, line_color="#1b2a4a"):
+    """Robust kart (Leaflet i iframe) – virker også inne i expandere, der pydeck feiler."""
+    pts = []
+    if start and start.get("lat") is not None:
+        pts.append({"lat": start["lat"], "lon": start["lon"], "label": "S",
+                    "navn": start.get("label") or "Start", "start": True})
+    for s in route:
+        if s.get("lat") is None:
+            continue
+        pts.append({"lat": s["lat"], "lon": s["lon"], "label": str(s.get("stop", "")),
+                    "navn": s.get("navn", ""), "start": False})
+    if not pts:
+        st.caption("Ingen punkter å vise på kart.")
+        return
+    tmpl = """<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>html,body{margin:0}#map{height:__H__px;width:100%}</style></head>
+<body><div id="map"></div><script>
+var pts=__DATA__, line="__LINE__";
+var map=L.map('map',{scrollWheelZoom:false});
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+ {maxZoom:19,attribution:'© OpenStreetMap, © CARTO'}).addTo(map);
+var ll=pts.map(function(p){return [p.lat,p.lon];});
+L.polyline(ll,{color:line,weight:4}).addTo(map);
+function ic(l,c){return L.divIcon({className:'',iconSize:[24,24],iconAnchor:[12,12],
+ html:'<div style="background:'+c+';color:#fff;width:24px;height:24px;border-radius:50%;'
+ +'display:flex;align-items:center;justify-content:center;font:700 12px sans-serif;'
+ +'border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.4)">'+l+'</div>'});}
+pts.forEach(function(p){var c=p.start?'#1f9d5b':line;
+ L.marker([p.lat,p.lon],{icon:ic(p.label,c)}).addTo(map).bindTooltip(p.label+'. '+p.navn);});
+map.fitBounds(ll,{padding:[30,30]});
+setTimeout(function(){map.invalidateSize();},250);
+</script></body></html>"""
+    html = (tmpl.replace("__DATA__", json.dumps(pts))
+                .replace("__LINE__", line_color)
+                .replace("__H__", str(height)))
+    import streamlit.components.v1 as components
+    components.html(html, height=height + 4)
+
+
 DAY_COLORS = [[27, 42, 74], [192, 57, 43], [31, 157, 91], [230, 126, 34],
               [142, 68, 173], [41, 128, 185], [22, 160, 133], [212, 172, 13]]
 
@@ -1166,14 +1207,32 @@ if nav == "Planlegging":
             if pmeta:
                 st.caption(f"≈ {pmeta.get('total_km', 0)} km · {pm // 60}t {pm % 60}min kjøring")
             if pstart and pstart.get("lat") is not None and comps:
-                route_map(pstart, comps)
+                leaflet_route_html(pstart, comps)
             g_url = gmaps_route_url(pstart, comps) if pstart else None
             if g_url:
                 st.link_button("🧭  Åpne ruta i Google Maps", g_url, use_container_width=True)
             for s in comps:
-                st.markdown(f"- **{s.get('stop','')}. {s.get('navn','')}** "
-                            f"<span class='bnc-sub'>({s.get('poststed','')})</span>",
-                            unsafe_allow_html=True)
+                org = str(s.get("orgnr"))
+                rc = st.columns([7, 1])
+                rc[0].markdown(f"**{s.get('stop','')}. {s.get('navn','')}** "
+                               f"<span class='bnc-sub'>({s.get('poststed','')})</span>",
+                               unsafe_allow_html=True)
+                if rc[1].button("✕", key=f"plx_{d}_{org}",
+                                help="Ikke aktuell – skjul fra forslag og fjern fra ruta",
+                                use_container_width=True):
+                    try:
+                        exclude_company(email, s)
+                        rest = [x for x in comps if str(x.get("orgnr")) != org]
+                        for i, x in enumerate(rest):
+                            x["stop"] = i + 1
+                        if rest and dt is not None:
+                            save_plan(email, dt, pstart, rest, pmeta)
+                        else:
+                            delete_plan(email, d)
+                        st.session_state["_toast"] = f"{s.get('navn','')} skjult fra forslag."
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"{exc}")
             if st.button("🗑️ Slett ruten", key=f"delp_{d}"):
                 try:
                     delete_plan(email, d)
