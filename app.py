@@ -1,9 +1,12 @@
 """BNC Selger – besøksrute-app for selger på veien.
 
-Kim setter startposisjon + timer på veien + snitt-tid pr. besøk, og appen foreslår
-en kjørerute med bedrifter (AS, utvalgte bransjer, ikke konkurs) fra Brønnøysund.
-Besøk hukes av (utelates resten av måneden), rapport skrives og sendes til
-backoffice, og «takk for besøket» + ukesoppsummering går via e-postkøen.
+Selgeren setter startposisjon + timer + snitt-tid pr. besøk, og appen foreslår
+en kjørerute med bedrifter (AS, utvalgte bilbransjer, ikke konkurs) fra
+Brønnøysund. Besøk hukes av (utelates resten av måneden), rapport sendes til
+backoffice, og «takk for praten» + ukesoppsummering går via e-postkøen.
+
+Admin (André) oppretter brukere og styrer innholdet i alle e-postene. Selgeren
+(Kim) ser kun sine egne sider: Min dag, Besøk, Historikk, Innstillinger.
 """
 import hashlib
 import json
@@ -17,10 +20,17 @@ import streamlit as st
 
 import routing
 
+try:
+    from streamlit_option_menu import option_menu
+    HAS_OPTION_MENU = True
+except Exception:
+    HAS_OPTION_MENU = False
+
 APP_DIR = Path(__file__).parent
 DATA_FILE = APP_DIR / "data" / "companies.json"
-LOGO = APP_DIR / "assets" / "bnc_logo_navy.webp"
-BACKOFFICE_EMAIL = os.getenv("BACKOFFICE_EMAIL", "post@bncnordic.no")
+LOGO_WHITE = APP_DIR / "assets" / "bnc_logo_white.webp"
+LOGO_NAVY = APP_DIR / "assets" / "bnc_logo_navy.webp"
+
 
 def _secret(name, default=""):
     v = os.getenv(name, "")
@@ -32,12 +42,10 @@ def _secret(name, default=""):
         return default
 
 
+BACKOFFICE_EMAIL = _secret("BACKOFFICE_EMAIL", "post@bncnordic.no")
 SUPABASE_URL = _secret("SUPABASE_URL").rstrip("/")
 SUPABASE_KEY = _secret("SUPABASE_SECRET_KEY")
-
-# Admin (kan opprette brukere). Komma-separert liste i Secrets om flere.
 ADMIN_EMAILS = {e.strip().lower() for e in _secret("ADMIN_EMAILS", "andre@bncnordic.no").split(",") if e.strip()}
-# Appens egen adresse – brukes til å bygge personlige innloggingslenker.
 APP_BASE_URL = _secret("APP_BASE_URL").rstrip("/")
 
 # Vennlige bransjenavn (kategori-feltet i companies.json). Rekkefølge = visning.
@@ -47,45 +55,106 @@ KATEGORIER = [
     "Bensinstasjon / drivstoff", "Bilutleie", "MC-verksted", "MC-forhandler",
 ]
 
-# Innebygd standardmal for «takk for praten» (Kim kan lage/endre egne maler i appen).
-DEFAULT_THANKS_SUBJECT = "Takk for praten – BNC Nordic"
-# Plassholdere {navn}, {telefon}, {epost} fylles med selgerens profil ved utsending.
-DEFAULT_THANKS_BODY = (
-    "Hei,\n\n"
-    "Takk for at du tok deg tid til en hyggelig prat da jeg var innom dere! 😊\n\n"
-    "Vi i BNC Nordic leverer produkter innen bilpleie, felger, understell og bremser, "
-    "og hjelper gjerne med å finne produkter som passer deres behov.\n\n"
-    "Har du spørsmål etter besøket, ønsker mer informasjon eller vil ha et tilbud, er "
-    "det bare å svare på denne e-posten eller ringe meg på {telefon}.\n\n"
-    "Hyggelig å bli kjent – vi holder kontakten!\n\n"
-    "{navn}\n"
-    "Produktansvarlig / Product manager\n\n"
-    "BNC Nordic Distribution AS\n"
-    "{telefon}\n"
-    "{epost}\n"
-    "Strømsveien 323B, 1081 Oslo"
-)
+# ---------------------------------------------------------- e-postinnhold -----
+# Standardtekster. Admin kan overstyre dem (lagres i tabellen email_content).
+DEFAULT_CONTENT = {
+    "thankyou": {
+        "subject": "Takk for praten – BNC Nordic",
+        "body": (
+            "Hei,\n\n"
+            "Takk for at du tok deg tid til en hyggelig prat da jeg var innom dere! 😊\n\n"
+            "Vi i BNC Nordic leverer produkter innen bilpleie, felger, understell og bremser, "
+            "og hjelper gjerne med å finne produkter som passer deres behov.\n\n"
+            "Har du spørsmål etter besøket, ønsker mer informasjon eller vil ha et tilbud, er "
+            "det bare å svare på denne e-posten eller ringe meg på {telefon}.\n\n"
+            "Hyggelig å bli kjent – vi holder kontakten!\n\n"
+            "{navn}\n"
+            "Produktansvarlig / Product manager\n\n"
+            "BNC Nordic Distribution AS\n"
+            "{telefon}\n"
+            "{epost}\n"
+            "Strømsveien 323B, 1081 Oslo"
+        ),
+        "vars": "{navn}, {telefon}, {epost}",
+        "label": "Takk for praten (til kunden, 2 virkedager etter besøk)",
+    },
+    "summary": {
+        "subject": "Ukesoppsummering: {antall} besøk ({periode})",
+        "body": (
+            "Hei,\n\n"
+            "Her er oppsummeringen av uka ({periode}):\n\n"
+            "Totalt {antall} besøk.\n"
+            "Utfall: {utfall}\n\n"
+            "Besøk:\n{besok_liste}\n\n"
+            "Stå på!\nBNC Nordic"
+        ),
+        "vars": "{navn}, {periode}, {antall}, {utfall}, {besok_liste}",
+        "label": "Ukesoppsummering (til selger, fredager)",
+    },
+    "report": {
+        "subject": "Besøksrapport: {bedrift} ({utfall})",
+        "body": (
+            "Selger: {selger}\n"
+            "Bedrift: {bedrift} (org {orgnr})\n"
+            "Adresse: {adresse}\n"
+            "Dato: {dato}\n"
+            "Utfall: {utfall}\n\n"
+            "Rapport:\n{rapport}\n"
+        ),
+        "vars": "{selger}, {bedrift}, {orgnr}, {adresse}, {dato}, {utfall}, {rapport}",
+        "label": "Besøksrapport (til backoffice, samme dag)",
+    },
+}
 
 
-def fill_template(text, settings, login_email):
-    """Bytt plassholdere {navn}/{telefon}/{epost} med selgerens profil."""
-    return (str(text or "")
-            .replace("{navn}", str(settings.get("name") or "").strip() or "Kim Werner Strand")
-            .replace("{telefon}", str(settings.get("phone") or "").strip())
-            .replace("{epost}", str(login_email or "").strip()))
+def apply_vars(text, mapping):
+    out = str(text or "")
+    for k, v in mapping.items():
+        out = out.replace("{" + k + "}", str(v))
+    return out
 
-st.set_page_config(page_title="BNC Selger", page_icon="🚗", layout="centered")
+
+def fill_thanks(text, settings, login_email):
+    return apply_vars(text, {
+        "navn": str(settings.get("name") or "").strip() or "Kim Werner Strand",
+        "telefon": str(settings.get("phone") or "").strip(),
+        "epost": str(login_email or "").strip(),
+    })
+
+
+st.set_page_config(page_title="BNC Selger", page_icon="🚗", layout="wide")
 
 st.markdown("""
 <style>
-  :root{ --navy:#1b2a4a; --accent:#1b2a4a; }
-  .stApp{ background:#f5f6f8; }
-  h1,h2,h3{ color:#1b2a4a; }
-  div.stButton>button[kind="primary"]{ background:#1b2a4a; border-color:#1b2a4a; }
-  .bnc-stop{ background:#fff;border:1px solid #e3e6ec;border-radius:12px;padding:12px 14px;margin-bottom:8px }
+  @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=Inter:wght@400;500;600&display=swap');
+  :root{ --navy:#1b2a4a; --navy-hi:#2a3e66; --green:#1f9d5b; }
+  html, body, [class*="css"]{ font-family:'Inter',system-ui,sans-serif; }
+  .stApp{ background:#eef1f5; }
+  .block-container{ max-width:1240px; padding-top:1.4rem; padding-bottom:3rem; }
+  h1,h2,h3,h4{ font-family:'Archivo','Inter',sans-serif; color:#1c2534; }
+  /* Sidemeny marineblå */
+  section[data-testid="stSidebar"]{ background:#1b2a4a; }
+  section[data-testid="stSidebar"] .stImage{ padding:6px 4px 2px; }
+  /* Primærknapper */
+  div.stButton>button[kind="primary"]{ background:#1b2a4a; border-color:#1b2a4a; color:#fff; border-radius:10px; font-weight:600; }
+  div.stButton>button[kind="primary"]:hover{ background:#2a3e66; border-color:#2a3e66; }
+  div.stButton>button[kind="secondary"]{ border-radius:10px; }
+  a[data-testid="stBaseLinkButton-secondary"], a[data-testid="baseLinkButton-secondary"]{ border-radius:10px; }
+  /* Kort (st.container(border=True)) */
+  div[data-testid="stVerticalBlockBorderWrapper"]{ background:#fff; border-radius:12px; }
+  /* Toppnivå-radio skjules (vi bruker sidemeny) */
+  .bnc-sub{ color:#6a7488; font-size:13.5px; margin-top:-6px; }
+  .bnc-stop{ background:#fff;border:1px solid #e3e8f0;border-radius:12px;padding:12px 14px;margin-bottom:9px }
   .bnc-stop b{ color:#1b2a4a }
-  .bnc-badge{ display:inline-block;background:#eef1f6;color:#1b2a4a;border-radius:999px;
-    padding:2px 9px;font-size:12px;font-weight:600;margin-right:6px }
+  .bnc-badge{ display:inline-block;background:#eef2f8;color:#1b2a4a;border-radius:999px;
+    padding:2px 10px;font-size:12px;font-weight:600;margin-right:6px }
+  .b-ok{ background:#e7f5ee;color:#1f9d5b }
+  .b-warn{ background:#f9efd9;color:#9a6a12 }
+  .b-no{ background:#fae9e6;color:#bb3b2c }
+  .bnc-stat{ background:#fff;border:1px solid #e3e8f0;border-radius:12px;padding:12px 15px }
+  .bnc-stat .k{ color:#6a7488;font-size:12px;font-weight:500 }
+  .bnc-stat .v{ font-family:'Archivo',sans-serif;font-size:23px;font-weight:700;color:#1c2534 }
+  .bnc-stat .v small{ font-size:13px;color:#6a7488;font-weight:600 }
 </style>
 """, unsafe_allow_html=True)
 
@@ -123,21 +192,7 @@ def sb_insert(table, rows):
 def sb_upsert(table, row, on_conflict):
     r = requests.post(f"{SUPABASE_URL}/rest/v1/{table}",
                       headers={**_sb_headers(), "Prefer": "resolution=merge-duplicates,return=minimal"},
-                      params={"on_conflict": on_conflict},
-                      json=[row], timeout=20)
-    r.raise_for_status()
-
-
-def sb_update(table, row_id, row):
-    r = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}",
-                       headers={**_sb_headers(), "Prefer": "return=minimal"},
-                       params={"id": f"eq.{row_id}"}, json=row, timeout=20)
-    r.raise_for_status()
-
-
-def sb_delete(table, row_id):
-    r = requests.delete(f"{SUPABASE_URL}/rest/v1/{table}",
-                        headers=_sb_headers(), params={"id": f"eq.{row_id}"}, timeout=20)
+                      params={"on_conflict": on_conflict}, json=[row], timeout=20)
     r.raise_for_status()
 
 
@@ -152,7 +207,6 @@ def load_companies():
 
 
 def geocode(text):
-    """Geokode et fritekst-startpunkt via Kartverket. Returnerer (lat, lon, label)."""
     try:
         r = requests.get("https://ws.geonorge.no/adresser/v1/sok",
                          params={"sok": text, "treffPerSide": 1, "utkoordsys": 4258}, timeout=20)
@@ -180,8 +234,6 @@ def month_key(d=None):
 
 
 def _place_q(p):
-    """Veipunkt som «Navn, adresse, postnr poststed» – gir Google riktig bedrift.
-    (Rå koordinater snapper til nærmeste kjente sted, ofte feil nabo-bedrift.)"""
     omr = f"{p.get('postnr','')} {p.get('poststed','')}".strip()
     parts = [p.get("navn", ""), p.get("adresse", ""), omr]
     q = ", ".join(x for x in parts if x)
@@ -189,13 +241,12 @@ def _place_q(p):
 
 
 def gmaps_route_url(start, stops):
-    """Google Maps-rute: start → alle stopp i rekkefølge (åpnes i app på mobil)."""
     if not stops:
         return None
     enc = urllib.parse.quote
     origin = start.get("label") or f"{start['lat']},{start['lon']}"
     dest = _place_q(stops[-1])
-    mids = stops[:-1][:9]  # Google tillater opptil 9 mellomstopp i denne URL-en
+    mids = stops[:-1][:9]
     url = (f"https://www.google.com/maps/dir/?api=1&origin={enc(origin)}"
            f"&destination={enc(dest)}&travelmode=driving")
     if mids:
@@ -204,7 +255,6 @@ def gmaps_route_url(start, stops):
 
 
 def gmaps_dest_url(p):
-    """Google Maps-navigasjon til ett stopp (navn + adresse)."""
     return (f"https://www.google.com/maps/dir/?api=1"
             f"&destination={urllib.parse.quote(_place_q(p))}&travelmode=driving")
 
@@ -226,46 +276,27 @@ def load_settings(email):
         return {}
 
 
-def load_templates(email):
+def get_content(kind):
+    """E-postinnhold: admin-overstyring fra DB, ellers standardtekst."""
+    d = DEFAULT_CONTENT[kind]
     try:
-        return sb_get("email_templates", "*", {"user_email": f"eq.{email}", "order": "name.asc"})
+        rows = sb_get("email_content", "kind,subject,body", {"kind": f"eq.{kind}"})
+        if rows:
+            return {"subject": rows[0].get("subject") or d["subject"],
+                    "body": rows[0].get("body") or d["body"]}
     except Exception:
-        return []
+        pass
+    return {"subject": d["subject"], "body": d["body"]}
 
 
-def template_options(email):
-    """Valgbare maler for takk-e-posten. Faller tilbake til innebygd standard."""
-    tmpls = load_templates(email)
-    std = {"id": None, "name": "Standard (takk for praten)",
-           "subject": DEFAULT_THANKS_SUBJECT, "body": DEFAULT_THANKS_BODY,
-           "is_default": not any(t.get("is_default") for t in tmpls)}
-    opts = list(tmpls) if tmpls else [std]
-    return opts
-
-
-# ------------------------------------------------------------------- UI -------
-if LOGO.exists():
-    st.image(str(LOGO), width=160)
-st.title("Selger på veien")
-
-# Enkel delt passord-gate (APP_PASSWORD i Streamlit Secrets). Appen HUSKER
-# innloggingen i nettadressen (?t=…&u=…), slik at Kim kan legge lenken til på
-# Hjem-skjerm og slippe å taste passord + e-post hver gang. Er APP_PASSWORD tom,
-# er appen åpen.
-APP_PASSWORD = os.getenv("APP_PASSWORD", "")
-try:
-    if not APP_PASSWORD:
-        APP_PASSWORD = str(st.secrets.get("APP_PASSWORD", ""))
-except Exception:
-    pass
+# ------------------------------------------------------------------- auth -----
+APP_PASSWORD = _secret("APP_PASSWORD")
 LOGIN_TOKEN = (hashlib.sha256(("bncselger::" + APP_PASSWORD).encode()).hexdigest()[:20]
                if APP_PASSWORD else "")
-
 _qp = st.query_params
 
 
 def _valid_personal_link():
-    """Personlig lenke ?u=<e-post>&k=<token> → brukeren slipper passord/e-post."""
     u = (_qp.get("u") or "").strip().lower()
     k = _qp.get("k") or ""
     if not (u and k):
@@ -279,40 +310,56 @@ def _valid_personal_link():
     return None
 
 
-# 1) Personlig lenke logger inn direkte (admin har satt opp brukeren).
 if not st.session_state.get("_authed"):
     _pu = _valid_personal_link()
     if _pu:
         st.session_state["_authed"] = True
         st.session_state["user_email"] = _pu
-# 2) Ellers: husk tidligere passord-innlogging i lenken (?t=).
 if APP_PASSWORD and not st.session_state.get("_authed") and _qp.get("t") == LOGIN_TOKEN:
     st.session_state["_authed"] = True
-# Forhåndsutfyll e-post fra lenken.
 if _qp.get("u") and not st.session_state.get("user_email"):
     st.session_state["user_email"] = _qp.get("u")
 
+
+def _logo(path, width):
+    if path.exists():
+        st.image(str(path), width=width)
+
+
+# Passord-gate (kun for admin/manuell pålogging – brukere kommer inn via lenke).
 if APP_PASSWORD and not st.session_state.get("_authed"):
-    _pw = st.text_input("Passord", type="password")
-    if st.button("Logg inn", type="primary"):
-        if _pw == APP_PASSWORD:
-            st.session_state["_authed"] = True
-            st.query_params["t"] = LOGIN_TOKEN
-            st.rerun()
-        else:
-            st.error("Feil passord.")
+    cols = st.columns([1, 1, 1])
+    with cols[1]:
+        _logo(LOGO_NAVY, 170)
+        st.subheader("Selger på veien")
+        _pw = st.text_input("Passord", type="password")
+        if st.button("Logg inn", type="primary", use_container_width=True):
+            if _pw == APP_PASSWORD:
+                st.session_state["_authed"] = True
+                st.query_params["t"] = LOGIN_TOKEN
+                st.rerun()
+            else:
+                st.error("Feil passord.")
     st.stop()
 
 if not sb_configured():
     st.error("Supabase er ikke konfigurert (SUPABASE_URL / SUPABASE_SECRET_KEY mangler).")
 
-email = st.text_input("Din e-post (selger)", key="user_email",
-                      placeholder="kim@bncnordic.no").strip().lower()
+# E-post / identitet.
+email = (st.session_state.get("user_email") or "").strip().lower()
 if not email:
-    st.info("Skriv inn e-posten din for å komme i gang.")
+    cols = st.columns([1, 1, 1])
+    with cols[1]:
+        _logo(LOGO_NAVY, 170)
+        st.subheader("Selger på veien")
+        e = st.text_input("Din e-post", placeholder="navn@bncnordic.no")
+        if st.button("Fortsett", type="primary", use_container_width=True):
+            if e.strip():
+                st.session_state["user_email"] = e.strip().lower()
+                st.rerun()
+        st.caption("Selgere kommer vanligvis inn via sin personlige lenke og slipper dette.")
     st.stop()
 
-# Lagre innlogging i lenken (slik at Hjem-skjerm-snarveien husker Kim).
 if _qp.get("u") != email:
     st.query_params["u"] = email
 if LOGIN_TOKEN and _qp.get("t") != LOGIN_TOKEN:
@@ -320,39 +367,83 @@ if LOGIN_TOKEN and _qp.get("t") != LOGIN_TOKEN:
 
 _settings = load_settings(email)
 is_admin = email in ADMIN_EMAILS
-_navopts = ["📍 Min dag", "📝 Besøk", "✉️ Maler", "📚 Historikk", "⚙️ Innstillinger"]
-if is_admin:
-    _navopts.append("👤 Brukere")
-nav = st.radio("", _navopts, horizontal=True, label_visibility="collapsed", key="nav")
-
 companies = load_companies()
+
+
+# ------------------------------------------------------------- sidemeny -------
+USER_PAGES = ["Min dag", "Besøk", "Historikk", "Innstillinger"]
+ADMIN_PAGES = ["Brukere", "E-postinnhold"]
+PAGE_ICONS = {"Min dag": "map", "Besøk": "clipboard-check", "Historikk": "clock-history",
+              "Innstillinger": "gear", "Brukere": "people", "E-postinnhold": "envelope"}
+pages = USER_PAGES + (ADMIN_PAGES if is_admin else [])
+
+with st.sidebar:
+    _logo(LOGO_WHITE, 150)
+    if HAS_OPTION_MENU:
+        nav = option_menu(
+            None, pages, icons=[PAGE_ICONS[p] for p in pages],
+            default_index=0, key="nav_menu",
+            styles={
+                "container": {"background-color": "#1b2a4a", "padding": "8px 4px"},
+                "nav-link": {"color": "#c3ccdd", "font-size": "14.5px", "font-weight": "500",
+                             "margin": "2px 0", "--hover-color": "#2a3e66"},
+                "nav-link-selected": {"background-color": "#ffffff", "color": "#1b2a4a",
+                                      "font-weight": "600"},
+                "icon": {"color": "#9fb0cb", "font-size": "15px"},
+            })
+    else:
+        nav = st.radio("Meny", pages, label_visibility="collapsed", key="nav_menu")
+    st.markdown("<div style='flex:1'></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='color:#c3ccdd;font-size:12.5px;border-top:1px solid #33456b;"
+        f"padding-top:10px;margin-top:8px'><b style='color:#fff'>"
+        f"{_settings.get('name') or email}</b><br>{email}"
+        f"{' · admin' if is_admin else ''}</div>", unsafe_allow_html=True)
+    if st.button("Logg ut", use_container_width=True):
+        st.query_params.clear()
+        for k in list(st.session_state.keys()):
+            st.session_state.pop(k, None)
+        st.rerun()
+
+# «Registrer besøk»-knappen på Min dag ber om å bytte til Besøk-siden.
+if st.session_state.pop("force_besok", False):
+    nav = "Besøk"
+
 if not companies:
     st.warning("Bedriftslista (data/companies.json) mangler eller er tom.")
     st.stop()
 
 
+def page_header(title, sub):
+    st.markdown(f"## {title}")
+    st.markdown(f"<div class='bnc-sub'>{sub}</div>", unsafe_allow_html=True)
+    st.write("")
+
+
 # ============================================================== MIN DAG =======
-if nav == "📍 Min dag":
-    st.subheader("Planlegg dagen")
+if nav == "Min dag":
+    page_header("Min dag", "Planlegg ruta, naviger og registrer besøk")
     _def_lat = _settings.get("start_lat")
     _def_lon = _settings.get("start_lon")
     _def_label = _settings.get("start_label") or ""
     _kat_present = [k for k in KATEGORIER if any(c.get("kategori") == k for c in companies)]
 
-    with st.form("plan"):
-        start_txt = st.text_input("Startposisjon (adresse/sted)", value=_def_label,
-                                  placeholder="F.eks. Storgata 1, Oslo")
-        c1, c2 = st.columns(2)
-        hours = c1.number_input("Timer på veien", 1.0, 12.0,
-                                float(_settings.get("hours_per_day") or 7), 0.5)
-        visit_min = c2.number_input("Snitt pr. besøk (min)", 10, 180,
-                                    int(_settings.get("avg_visit_minutes") or 60), 5)
-        velg_alle = st.checkbox("Velg alle bransjer")
-        valgte_cat = st.multiselect(
-            "Bransjer", _kat_present, default=[],
-            help="La stå tom og huk av «Velg alle bransjer», eller velg kun de du vil besøke.")
-        maxkm = st.slider("Maks avstand mellom besøk (km)", 10, 300, 120, 10)
-        planlegg = st.form_submit_button("🧭 Foreslå rute", type="primary", use_container_width=True)
+    with st.container(border=True):
+        with st.form("plan"):
+            c1, c2, c3 = st.columns([2, 1, 1])
+            start_txt = c1.text_input("Startposisjon", value=_def_label,
+                                      placeholder="F.eks. Storgata 1, Oslo")
+            hours = c2.number_input("Timer på veien", 1.0, 12.0,
+                                    float(_settings.get("hours_per_day") or 7), 0.5)
+            visit_min = c3.number_input("Snitt pr. besøk (min)", 10, 180,
+                                        int(_settings.get("avg_visit_minutes") or 60), 5)
+            velg_alle = st.checkbox("Velg alle bransjer")
+            valgte_cat = st.multiselect(
+                "Bransjer", _kat_present, default=[],
+                help="La stå tom og huk av «Velg alle bransjer», eller velg kun de du vil besøke.")
+            maxkm = st.slider("Maks avstand mellom besøk (km)", 10, 300, 120, 10)
+            planlegg = st.form_submit_button("🧭  Foreslå rute", type="primary",
+                                             use_container_width=True)
 
     if planlegg:
         valgte = _kat_present if velg_alle else valgte_cat
@@ -372,92 +463,111 @@ if nav == "📍 Min dag":
                                          visit_minutes=visit_min, max_leg_km=maxkm)
                 st.session_state["route"] = res["route"]
                 st.session_state["route_start"] = {"lat": lat, "lon": lon, "label": label}
-                st.success(f"Foreslått rute: **{len(res['route'])} besøk** · "
-                           f"{res['total_km']} km · ca. {res['total_min']} min "
-                           f"(av {res['n_candidates']} aktuelle bedrifter).")
+                st.session_state["route_meta"] = res
 
     route = st.session_state.get("route") or []
     start = st.session_state.get("route_start")
+    meta = st.session_state.get("route_meta") or {}
     if route and start:
-        # Hele ruta i Google Maps (åpnes i Maps-appen på mobil → rett inn på GPS).
-        g_url = gmaps_route_url(start, route)
-        if g_url:
-            st.link_button("🧭 Åpne hele ruta i Google Maps", g_url, use_container_width=True)
+        st.write("")
+        h = int(meta.get("total_min", 0)) // 60
+        m = int(meta.get("total_min", 0)) % 60
+        s1, s2, s3 = st.columns(3)
+        s1.markdown(f"<div class='bnc-stat'><div class='k'>Besøk i ruta</div>"
+                    f"<div class='v'>{len(route)}</div></div>", unsafe_allow_html=True)
+        s2.markdown(f"<div class='bnc-stat'><div class='k'>Samlet kjøring</div>"
+                    f"<div class='v'>{meta.get('total_km',0)} <small>km</small></div></div>", unsafe_allow_html=True)
+        s3.markdown(f"<div class='bnc-stat'><div class='k'>Beregnet tid</div>"
+                    f"<div class='v'>{h} t {m} <small>min</small></div></div>", unsafe_allow_html=True)
+        st.caption(f"Av {meta.get('n_candidates', 0)} aktuelle bedrifter innenfor valgene dine.")
+        st.write("")
 
-        try:
-            import pydeck as pdk
-            pts = [{"lat": start["lat"], "lon": start["lon"], "navn": "START",
-                    "label": "S", "color": [0, 150, 80]}]
-            pts += [{"lat": s["lat"], "lon": s["lon"], "navn": s.get("navn", ""),
-                     "label": str(s["stop"]), "color": [27, 42, 74]} for s in route]
-            path = [[p["lon"], p["lat"]] for p in pts]
-            lats = [p["lat"] for p in pts]
-            lons = [p["lon"] for p in pts]
-            span = max(max(lats) - min(lats), max(lons) - min(lons))
-            zoom = (12 if span < 0.05 else 11 if span < 0.15 else 10 if span < 0.3 else
-                    9 if span < 0.6 else 8 if span < 1.2 else 7 if span < 2.5 else 6)
-            st.pydeck_chart(pdk.Deck(
-                map_style=None,
-                initial_view_state=pdk.ViewState(latitude=sum(lats) / len(lats),
-                                                 longitude=sum(lons) / len(lons), zoom=zoom),
-                layers=[
-                    pdk.Layer("PathLayer", data=[{"path": path}], get_path="path",
-                              get_width=4, width_min_pixels=3, get_color=[27, 42, 74]),
-                    pdk.Layer("ScatterplotLayer", data=pts, get_position=["lon", "lat"],
-                              get_fill_color="color", get_radius=300,
-                              radius_min_pixels=9, radius_max_pixels=20, pickable=True),
-                    pdk.Layer("TextLayer", data=pts, get_position=["lon", "lat"],
-                              get_text="label", get_size=13, get_color=[255, 255, 255],
-                              get_alignment_baseline="'center'"),
-                ],
-                tooltip={"text": "{label}. {navn}"},
-            ))
-        except Exception:
-            st.map([{"lat": p["lat"], "lon": p["lon"]} for p in route])
+        show_map = st.checkbox("Vis kart", value=True)
+        list_col, map_col = st.columns([5, 6]) if show_map else (st.container(), None)
 
-        st.markdown("#### Dagens besøk")
-        for s in route:
-            st.markdown(
-                f"<div class='bnc-stop'><b>{s['stop']}. {s.get('navn','')}</b><br>"
-                f"<span class='bnc-badge'>{s.get('kategori', s.get('bransje_kode',''))}</span>"
-                f"{s.get('adresse','')}, {s.get('postnr','')} {s.get('poststed','')}<br>"
-                f"<small>+{s.get('leg_km')} km / {s.get('leg_min')} min · kum. {s.get('cum_min')} min</small></div>",
-                unsafe_allow_html=True)
-            b1, b2 = st.columns(2)
-            if b1.button(f"📝 Registrer besøk", key=f"reg_{s.get('orgnr')}"):
-                st.session_state["selected_company"] = s
-                st.session_state["nav"] = "📝 Besøk"
-                st.rerun()
-            b2.link_button("🧭 Google Maps", gmaps_dest_url(s))
+        with list_col:
+            g_url = gmaps_route_url(start, route)
+            if g_url:
+                st.link_button("🧭  Åpne hele ruta i Google Maps", g_url, use_container_width=True)
+            st.markdown("#### Dagens besøk")
+            for s in route:
+                st.markdown(
+                    f"<div class='bnc-stop'><b>{s['stop']}. {s.get('navn','')}</b><br>"
+                    f"<span class='bnc-badge'>{s.get('kategori', s.get('bransje_kode',''))}</span>"
+                    f"{s.get('adresse','')}, {s.get('postnr','')} {s.get('poststed','')}<br>"
+                    f"<small>+{s.get('leg_km')} km / {s.get('leg_min')} min · kum. {s.get('cum_min')} min</small></div>",
+                    unsafe_allow_html=True)
+                b1, b2 = st.columns(2)
+                if b1.button("📝  Registrer besøk", key=f"reg_{s.get('orgnr')}", use_container_width=True):
+                    st.session_state["selected_company"] = s
+                    st.session_state["force_besok"] = True
+                    st.rerun()
+                b2.link_button("🧭  Naviger", gmaps_dest_url(s), use_container_width=True)
+
+        if show_map and map_col is not None:
+            with map_col:
+                try:
+                    import pydeck as pdk
+                    pts = [{"lat": start["lat"], "lon": start["lon"], "navn": "START",
+                            "label": "S", "color": [31, 157, 91]}]
+                    pts += [{"lat": s["lat"], "lon": s["lon"], "navn": s.get("navn", ""),
+                             "label": str(s["stop"]), "color": [27, 42, 74]} for s in route]
+                    path = [[p["lon"], p["lat"]] for p in pts]
+                    lats = [p["lat"] for p in pts]
+                    lons = [p["lon"] for p in pts]
+                    span = max(max(lats) - min(lats), max(lons) - min(lons))
+                    zoom = (12 if span < 0.05 else 11 if span < 0.15 else 10 if span < 0.3 else
+                            9 if span < 0.6 else 8 if span < 1.2 else 7 if span < 2.5 else 6)
+                    st.pydeck_chart(pdk.Deck(
+                        map_style=None,
+                        initial_view_state=pdk.ViewState(latitude=sum(lats) / len(lats),
+                                                         longitude=sum(lons) / len(lons), zoom=zoom),
+                        layers=[
+                            pdk.Layer("PathLayer", data=[{"path": path}], get_path="path",
+                                      get_width=4, width_min_pixels=3, get_color=[27, 42, 74]),
+                            pdk.Layer("ScatterplotLayer", data=pts, get_position=["lon", "lat"],
+                                      get_fill_color="color", get_radius=300,
+                                      radius_min_pixels=9, radius_max_pixels=20, pickable=True),
+                            pdk.Layer("TextLayer", data=pts, get_position=["lon", "lat"],
+                                      get_text="label", get_size=13, get_color=[255, 255, 255],
+                                      get_alignment_baseline="'center'"),
+                        ],
+                        tooltip={"text": "{label}. {navn}"},
+                    ))
+                except Exception:
+                    st.map([{"lat": p["lat"], "lon": p["lon"]} for p in route])
+    else:
+        st.info("Sett startposisjon, timer og bransjer over, og trykk **Foreslå rute**.")
 
 
 # ================================================================ BESØK =======
-if nav == "📝 Besøk":
-    st.subheader("Registrer besøk")
+if nav == "Besøk":
+    page_header("Registrer besøk", "Resultat, rapport og oppfølging")
     sel = st.session_state.get("selected_company")
     if not sel:
-        # Velg bedrift manuelt (søk)
-        q = st.text_input("Søk bedrift (navn)", placeholder="Skriv navn …")
+        q = st.text_input("Søk bedrift", placeholder="Skriv navn …")
         hits = [c for c in companies if q and q.lower() in str(c.get("navn", "")).lower()][:20]
         if hits:
             lbl = st.selectbox("Treff", [f"{c['navn']} · {c.get('poststed','')}" for c in hits])
             sel = hits[[f"{c['navn']} · {c.get('poststed','')}" for c in hits].index(lbl)]
     if sel:
-        st.markdown(f"**{sel.get('navn','')}** · {sel.get('adresse','')}, "
-                    f"{sel.get('postnr','')} {sel.get('poststed','')}")
-        _opts = template_options(email)
-        _onames = [t["name"] for t in _opts]
-        _def_idx = next((i for i, t in enumerate(_opts) if t.get("is_default")), 0)
+        with st.container(border=True):
+            st.markdown(f"**{sel.get('navn','')}**  \n"
+                        f"<span class='bnc-sub'>{sel.get('adresse','')}, "
+                        f"{sel.get('postnr','')} {sel.get('poststed','')}</span>", unsafe_allow_html=True)
         with st.form("besok"):
+            st.markdown("**Besøksresultat**")
             outcome = st.selectbox("Utfall", ["Interessert", "Vil tenke", "Ikke interessert",
-                                              "Ikke til stede", "Solgt", "Annet"])
-            report = st.text_area("Besøksrapport", placeholder="Hva skjedde på besøket …", height=140)
-            contact = st.text_input("Send «takk for praten» til (kundens e-post)",
-                                    value=sel.get("epost", ""))
-            send_thanks = st.checkbox("📧 Send «takk for praten» (går ut 2 virkedager etter)",
+                                              "Ikke til stede", "Solgt", "Annet"],
+                                   label_visibility="collapsed")
+            st.markdown("**Besøksrapport**")
+            report = st.text_area("Rapport", placeholder="Hva skjedde på besøket …",
+                                  height=150, label_visibility="collapsed")
+            st.markdown("**Oppfølging på e-post**")
+            contact = st.text_input("Kundens e-post", value=sel.get("epost", ""))
+            send_thanks = st.checkbox("Send «takk for praten» (går ut 2 virkedager etter besøket)",
                                       value=bool(sel.get("epost")))
-            tmpl_name = st.selectbox("Mal for takk-e-posten", _onames, index=_def_idx)
-            lagre = st.form_submit_button("💾 Lagre besøk + send rapport", type="primary",
+            lagre = st.form_submit_button("💾  Lagre besøk og send rapport", type="primary",
                                           use_container_width=True)
         if lagre:
             try:
@@ -468,113 +578,42 @@ if nav == "📝 Besøk":
                     "visited_on": today.isoformat(), "month_key": month_key(today),
                     "report": report, "outcome": outcome, "contact_email": contact,
                 })
-                # Rapport til backoffice (sendes av e-postjobben, send_after=i dag).
+                rc = get_content("report")
+                rmap = {"selger": email, "bedrift": sel.get("navn", ""),
+                        "orgnr": sel.get("orgnr", ""),
+                        "adresse": f"{sel.get('adresse','')}, {sel.get('postnr','')} {sel.get('poststed','')}",
+                        "dato": today.isoformat(), "utfall": outcome, "rapport": report}
                 sb_insert("email_queue", {
                     "kind": "report", "to_email": BACKOFFICE_EMAIL,
-                    "subject": f"Besøksrapport: {sel.get('navn','')} ({outcome})",
-                    "body": (f"Selger: {email}\nBedrift: {sel.get('navn','')} (org {sel.get('orgnr')})\n"
-                             f"Adresse: {sel.get('adresse','')}, {sel.get('postnr','')} {sel.get('poststed','')}\n"
-                             f"Dato: {today.isoformat()}\nUtfall: {outcome}\n\nRapport:\n{report}\n"),
+                    "subject": apply_vars(rc["subject"], rmap),
+                    "body": apply_vars(rc["body"], rmap),
                     "send_after": today.isoformat(),
                     "payload": {"orgnr": str(sel.get("orgnr")), "user": email},
                 })
-                # Takk-e-post til kunde, 2 virkedager etter – med valgt mal.
                 if send_thanks and contact:
-                    _ch = next((t for t in _opts if t["name"] == tmpl_name), _opts[0])
+                    tc = get_content("thankyou")
                     sb_insert("email_queue", {
                         "kind": "thankyou", "to_email": contact,
-                        "subject": fill_template(_ch.get("subject") or DEFAULT_THANKS_SUBJECT, _settings, email),
-                        "body": fill_template(_ch.get("body") or DEFAULT_THANKS_BODY, _settings, email),
+                        "subject": fill_thanks(tc["subject"], _settings, email),
+                        "body": fill_thanks(tc["body"], _settings, email),
                         "send_after": add_business_days(today, 2).isoformat(),
-                        "payload": {"navn": sel.get("navn", ""), "selger": email, "mal": tmpl_name},
+                        "payload": {"navn": sel.get("navn", ""), "selger": email},
                     })
                     if not str(_settings.get("phone") or "").strip():
-                        st.info("Tips: legg inn telefonnummeret ditt under ⚙️ Innstillinger – "
+                        st.info("Tips: legg inn telefonnummeret ditt under Innstillinger – "
                                 "det settes automatisk inn i takk-e-posten.")
-                st.success("✅ Besøk registrert. Rapport går til backoffice, og takk-e-post "
-                           "er lagt i kø. Bedriften vises ikke i forslag igjen denne måneden.")
+                st.success("✅ Besøk registrert. Rapport går til backoffice, og takk-e-post er "
+                           "lagt i kø. Bedriften vises ikke i forslag igjen denne måneden.")
                 st.session_state.pop("selected_company", None)
             except Exception as exc:
                 st.error(f"Kunne ikke lagre: {exc}")
-
-
-# ================================================================ MALER ========
-if nav == "✉️ Maler":
-    st.subheader("E-postmaler")
-    st.caption("Maler for «takk for praten»-e-posten. Sett én som standard – den "
-               "foreslås når du registrerer et besøk. Du kan lage flere og endre fritt. "
-               "Bruk **{navn}**, **{telefon}** og **{epost}** i teksten – de fylles "
-               "automatisk fra profilen din (⚙️ Innstillinger) ved utsending.")
-    tmpls = load_templates(email)
-    if not tmpls:
-        st.info("Ingen egne maler ennå – da brukes den innebygde standardmalen. "
-                "Legg den inn her for å redigere den, eller lag en ny under.")
-        if st.button("➕ Legg inn standardmalen (så du kan redigere den)"):
-            try:
-                sb_insert("email_templates", {"user_email": email, "name": "Takk for praten",
-                                              "subject": DEFAULT_THANKS_SUBJECT,
-                                              "body": DEFAULT_THANKS_BODY, "is_default": True})
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Kunne ikke lagre: {exc}")
-        with st.expander("Se den innebygde standardmalen"):
-            st.caption(f"Emne: {DEFAULT_THANKS_SUBJECT}")
-            st.text(DEFAULT_THANKS_BODY)
-
-    for t in tmpls:
-        with st.expander(("⭐ " if t.get("is_default") else "✉️ ") + t["name"]):
-            with st.form(f"tmpl_{t['id']}"):
-                nm = st.text_input("Navn", value=t.get("name", ""))
-                subj = st.text_input("Emne", value=t.get("subject", ""))
-                body = st.text_area("Tekst", value=t.get("body", ""), height=280)
-                b1, b2, b3 = st.columns(3)
-                do_save = b1.form_submit_button("💾 Lagre")
-                do_def = b2.form_submit_button("⭐ Sett standard")
-                do_del = b3.form_submit_button("🗑️ Slett")
-            if do_save:
-                try:
-                    sb_update("email_templates", t["id"], {
-                        "name": nm, "subject": subj, "body": body,
-                        "updated_at": datetime.now(timezone.utc).isoformat()})
-                    st.success("Lagret."); st.rerun()
-                except Exception as exc:
-                    st.error(f"Kunne ikke lagre: {exc}")
-            if do_def:
-                try:
-                    for o in tmpls:
-                        if o["id"] != t["id"] and o.get("is_default"):
-                            sb_update("email_templates", o["id"], {"is_default": False})
-                    sb_update("email_templates", t["id"], {"is_default": True})
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Kunne ikke sette standard: {exc}")
-            if do_del:
-                try:
-                    sb_delete("email_templates", t["id"]); st.rerun()
-                except Exception as exc:
-                    st.error(f"Kunne ikke slette: {exc}")
-
-    st.markdown("**Ny mal**")
-    with st.form("ny_mal"):
-        nn = st.text_input("Navn", placeholder="F.eks. «Takk – kort»")
-        ns = st.text_input("Emne", value=DEFAULT_THANKS_SUBJECT)
-        nb = st.text_area("Tekst", value=DEFAULT_THANKS_BODY, height=220)
-        if st.form_submit_button("➕ Opprett mal", type="primary"):
-            if nn.strip():
-                try:
-                    sb_insert("email_templates", {"user_email": email, "name": nn.strip(),
-                                                  "subject": ns, "body": nb,
-                                                  "is_default": not tmpls})
-                    st.success("Mal opprettet."); st.rerun()
-                except Exception as exc:
-                    st.error(f"Kunne ikke opprette: {exc}")
-            else:
-                st.error("Gi malen et navn.")
+    else:
+        st.info("Søk opp en bedrift for å registrere et besøk – eller start fra «Min dag».")
 
 
 # ============================================================= HISTORIKK ======
-if nav == "📚 Historikk":
-    st.subheader("Mine besøk denne måneden")
+if nav == "Historikk":
+    page_header("Historikk", f"Dine besøk i {month_key()}")
     try:
         rows = sb_get("visits", "*",
                       {"user_email": f"eq.{email}", "month_key": f"eq.{month_key()}",
@@ -583,34 +622,45 @@ if nav == "📚 Historikk":
         rows = []
         st.error(f"Kunne ikke hente: {exc}")
     st.caption(f"{len(rows)} besøk i {month_key()}.")
+    _cls = {"Interessert": "b-ok", "Solgt": "b-ok", "Vil tenke": "b-warn",
+            "Ikke til stede": "b-no", "Ikke interessert": "b-no"}
     for r in rows:
+        cls = _cls.get(r.get("outcome", ""), "bnc-badge")
         st.markdown(
             f"<div class='bnc-stop'><b>{r.get('navn','')}</b> "
-            f"<span class='bnc-badge'>{r.get('outcome','')}</span><br>"
+            f"<span class='bnc-badge {cls}'>{r.get('outcome','')}</span><br>"
             f"<small>{r.get('visited_on','')} · {r.get('kommune','')}</small><br>"
             f"{r.get('report','') or '<i>ingen rapporttekst</i>'}</div>",
             unsafe_allow_html=True)
+    if not rows:
+        st.info("Ingen besøk registrert denne måneden ennå.")
 
 
 # =========================================================== INNSTILLINGER ====
-if nav == "⚙️ Innstillinger":
-    st.subheader("Innstillinger")
+if nav == "Innstillinger":
+    page_header("Innstillinger", "Profil og standardverdier for planlegging")
     with st.form("settings"):
-        name = st.text_input("Navn", value=_settings.get("name", ""))
-        phone = st.text_input("Telefon", value=_settings.get("phone", ""),
-                              placeholder="+47 …",
-                              help="Settes automatisk inn i «takk for praten»-e-posten ({telefon}).")
-        summary_email = st.text_input("E-post for ukesoppsummering",
-                                      value=_settings.get("summary_email", "") or email,
-                                      help="Hit sendes fredagens ukesoppsummering (fra post@bncnordic.no). "
-                                           "Kan være en annen adresse enn innloggings-e-posten.")
-        start_label = st.text_input("Fast startposisjon (adresse)", value=_settings.get("start_label", ""),
-                                    placeholder="Valgfritt – kan overstyres på «Min dag» hver dag")
         c1, c2 = st.columns(2)
-        hours = c1.number_input("Timer pr. dag", 1.0, 12.0, float(_settings.get("hours_per_day") or 7), 0.5)
-        visit_min = c2.number_input("Snitt pr. besøk (min)", 10, 180, int(_settings.get("avg_visit_minutes") or 60), 5)
-        speed = st.number_input("Snittfart bil (km/t)", 30, 110, int(_settings.get("speed_kmh") or 70), 5)
-        lagre = st.form_submit_button("💾 Lagre innstillinger", type="primary", use_container_width=True)
+        with c1:
+            with st.container(border=True):
+                st.markdown("**Selgerprofil**")
+                name = st.text_input("Navn", value=_settings.get("name", ""))
+                phone = st.text_input("Telefon", value=_settings.get("phone", ""), placeholder="+47 …",
+                                      help="Settes automatisk inn i takk-e-posten ({telefon}).")
+                summary_email = st.text_input("E-post for ukesoppsummering",
+                                              value=_settings.get("summary_email", "") or email,
+                                              help="Hit sendes fredagens ukesoppsummering.")
+        with c2:
+            with st.container(border=True):
+                st.markdown("**Standard for planlegging**")
+                start_label = st.text_input("Fast startposisjon (adresse)",
+                                            value=_settings.get("start_label", ""),
+                                            placeholder="Valgfritt – kan overstyres på «Min dag»")
+                cc1, cc2 = st.columns(2)
+                hours = cc1.number_input("Timer pr. dag", 1.0, 12.0, float(_settings.get("hours_per_day") or 7), 0.5)
+                visit_min = cc2.number_input("Snitt pr. besøk (min)", 10, 180, int(_settings.get("avg_visit_minutes") or 60), 5)
+                speed = st.number_input("Snittfart bil (km/t)", 30, 110, int(_settings.get("speed_kmh") or 70), 5)
+        lagre = st.form_submit_button("💾  Lagre innstillinger", type="primary")
     if lagre:
         lat, lon, label = (_settings.get("start_lat"), _settings.get("start_lon"), start_label)
         if start_label:
@@ -630,84 +680,15 @@ if nav == "⚙️ Innstillinger":
         except Exception as exc:
             st.error(f"Kunne ikke lagre: {exc}")
 
-    # ---- Testutsending: kontroller e-postene før lansering --------------------
     st.divider()
-    with st.expander("🧪 Send testmail (kontroll før lansering)"):
-        st.caption("Legg en test-e-post i kø og kjør **E-postjobb** i GitHub Actions "
-                   "(eller vent inntil 1 time) for å motta den. Forhåndsvisningen under "
-                   "viser nøyaktig innholdet.")
-        tst_to = st.text_input("Send test til", value=email, key="test_to")
-        tst_type = st.radio("Type", ["Takk for praten", "Ukesoppsummering", "Besøksrapport"],
-                            key="test_type")
-
-        if tst_type == "Takk for praten":
-            _opts = template_options(email)
-            _tn = st.selectbox("Mal", [t["name"] for t in _opts], key="test_tmpl")
-            _ch = next((t for t in _opts if t["name"] == _tn), _opts[0])
-            tsubj = fill_template(_ch.get("subject") or DEFAULT_THANKS_SUBJECT, _settings, email)
-            tbody = fill_template(_ch.get("body") or DEFAULT_THANKS_BODY, _settings, email)
-            tkind = "thankyou"
-        elif tst_type == "Ukesoppsummering":
-            tsubj = "Ukesoppsummering (TEST): 2 besøk"
-            tbody = ("Hei,\n\nHer er oppsummeringen av uka (eksempel):\n\n"
-                     "Totalt 2 besøk.\nUtfall: Interessert: 1, Vil tenke: 1\n\n"
-                     "Besøk:\n- 2026-10-12  Eksempel Bil AS (OSLO) – Interessert\n"
-                     "- 2026-10-13  Demo Verksted AS (BÆRUM) – Vil tenke\n\n"
-                     "Stå på!\nBNC Nordic")
-            tkind = "summary"
-        else:
-            tsubj = "Besøksrapport (TEST): Eksempel Bil AS (Interessert)"
-            tbody = (f"Selger: {email}\nBedrift: Eksempel Bil AS (org 999999999)\n"
-                     "Adresse: Eksempelveien 1, 0001 OSLO\n"
-                     f"Dato: {date.today().isoformat()}\nUtfall: Interessert\n\n"
-                     "Rapport:\nDette er en testrapport for å kontrollere formatet.\n")
-            tkind = "report"
-
-        st.caption("Forhåndsvisning – emne:")
-        st.code(tsubj, language=None)
-        st.caption("Forhåndsvisning – tekst:")
-        st.text(tbody)
-
-        if st.button("📨 Legg testmail i kø"):
-            try:
-                sb_insert("email_queue", {
-                    "kind": tkind, "to_email": tst_to.strip(),
-                    "subject": "[TEST] " + tsubj, "body": tbody,
-                    "send_after": date.today().isoformat(),
-                    "payload": {"test": True, "selger": email},
-                })
-                st.success(f"✅ Testmail lagt i kø til {tst_to.strip()}. Gå til GitHub → "
-                           "Actions → «E-postjobb» → Run workflow for å sende den nå.")
-            except Exception as exc:
-                st.error(f"Kunne ikke legge i kø: {exc}")
-
-    # ---- Pålogging / brukere --------------------------------------------------
-    st.divider()
-    st.markdown("#### Pålogging")
-    if is_admin:
-        st.caption("Du er **admin**. Under **👤 Brukere** kan du opprette brukere og sende "
-                   "hver en personlig lenke – da logger de inn uten passord. Appen husker "
-                   "også innloggingen i nettadressen, så «Legg til på Hjem-skjerm» gir en "
-                   "snarvei som åpner rett inn.")
-    else:
-        st.caption("Åpne den personlige lenken du fikk, og **legg appen til på Hjem-skjerm** "
-                   "(del-knappen → «Legg til på Hjem-skjerm») – da åpner snarveien rett inn, "
-                   "uten passord og e-post. Du har din egen profil og historikk.")
-    if st.button("🚪 Logg ut (fjern minnet i lenken)"):
-        st.query_params.clear()
-        for k in ("_authed", "user_email", "route", "route_start", "selected_company"):
-            st.session_state.pop(k, None)
-        st.rerun()
+    st.caption("Du kommer inn via din personlige lenke. Legg appen til på Hjem-skjerm på "
+               "mobilen (del-knappen → «Legg til på Hjem-skjerm») – da åpner snarveien rett inn.")
 
 
-# =============================================================== BRUKERE ======
-if nav == "👤 Brukere" and is_admin:
+# =============================================================== BRUKERE =======
+if nav == "Brukere" and is_admin:
     import secrets as _secrets
-    st.subheader("Brukere")
-    st.caption("Opprett en bruker (navn + e-post) og send den **personlige lenken** til "
-               "vedkommende. Når de åpner lenken er de logget inn – uten passord og uten å "
-               "taste e-post – og kan legge appen til på Hjem-skjerm. Hver bruker har egen "
-               "profil og historikk.")
+    page_header("Brukere", "Opprett selgere og gi dem personlig innloggingslenke")
 
     def personal_link(u):
         tok = u.get("login_token")
@@ -716,60 +697,113 @@ if nav == "👤 Brukere" and is_admin:
         q = urllib.parse.urlencode({"u": u["email"], "k": tok})
         return f"{APP_BASE_URL}/?{q}" if APP_BASE_URL else f"?{q}"
 
-    with st.form("ny_bruker"):
-        bn = st.text_input("Navn", placeholder="F.eks. Kim Werner Strand")
-        be = st.text_input("E-post", placeholder="kim@bncnordic.no").strip().lower()
-        if st.form_submit_button("➕ Opprett bruker / lag ny lenke", type="primary"):
-            if be:
-                try:
-                    sb_upsert("salesperson_settings", {
-                        "email": be, "name": bn,
-                        "login_token": _secrets.token_urlsafe(12),
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                    }, "email")
-                    st.success("✅ Bruker klar – lenken vises i lista under.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Kunne ikke lagre: {exc}")
-            else:
-                st.error("Skriv inn e-post.")
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        with st.container(border=True):
+            st.markdown("**Ny bruker**")
+            with st.form("ny_bruker"):
+                bn = st.text_input("Navn", placeholder="Kim Werner Strand")
+                be = st.text_input("E-post", placeholder="kim@bncnordic.no").strip().lower()
+                if st.form_submit_button("➕  Opprett / ny lenke", type="primary", use_container_width=True):
+                    if be:
+                        try:
+                            sb_upsert("salesperson_settings", {
+                                "email": be, "name": bn, "login_token": _secrets.token_urlsafe(12),
+                                "updated_at": datetime.now(timezone.utc).isoformat()}, "email")
+                            st.success("✅ Bruker klar – lenken vises til høyre.")
+                        except Exception as exc:
+                            st.error(f"Kunne ikke lagre: {exc}")
+                    else:
+                        st.error("Skriv inn e-post.")
+    with c2:
+        if not APP_BASE_URL:
+            st.warning("Legg **APP_BASE_URL** i Streamlit Secrets (appens adresse) for komplette lenker.")
+        try:
+            users = sb_get("salesperson_settings", "email,name,login_token", {"order": "email.asc"})
+        except Exception as exc:
+            users = []
+            st.error(f"Kunne ikke hente brukere: {exc}")
+        for u in users:
+            with st.container(border=True):
+                tag = " · 👑 admin" if u["email"] in ADMIN_EMAILS else ""
+                st.markdown(f"**{u.get('name') or '(uten navn)'}** — {u['email']}{tag}")
+                link = personal_link(u)
+                if link:
+                    st.code(link, language=None)
+                else:
+                    st.caption("Ingen lenke ennå – trykk «Ny lenke».")
+                bc = st.columns(2)
+                if bc[0].button("🔄 Ny lenke", key=f"nl_{u['email']}", use_container_width=True):
+                    try:
+                        sb_upsert("salesperson_settings", {
+                            "email": u["email"], "login_token": _secrets.token_urlsafe(12),
+                            "updated_at": datetime.now(timezone.utc).isoformat()}, "email")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"{exc}")
+                if u["email"] not in ADMIN_EMAILS:
+                    if bc[1].button("🚫 Steng lenke", key=f"rv_{u['email']}", use_container_width=True):
+                        try:
+                            sb_upsert("salesperson_settings", {
+                                "email": u["email"], "login_token": None,
+                                "updated_at": datetime.now(timezone.utc).isoformat()}, "email")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"{exc}")
 
-    if not APP_BASE_URL:
-        st.warning("Tips: legg **APP_BASE_URL** i Streamlit Secrets (appens adresse, f.eks. "
-                   "`https://bnc-salg-xxx.streamlit.app`), så blir lenkene komplette og "
-                   "klikkbare. Uten den vises bare «?u=…&k=…»-delen som du selv setter "
-                   "foran appens adresse.")
 
-    try:
-        users = sb_get("salesperson_settings", "email,name,login_token", {"order": "email.asc"})
-    except Exception as exc:
-        users = []
-        st.error(f"Kunne ikke hente brukere: {exc}")
-    st.markdown(f"**{len(users)} bruker(e)**")
-    for u in users:
-        link = personal_link(u)
-        tag = " · 👑 admin" if u["email"] in ADMIN_EMAILS else ""
-        st.markdown(f"**{u.get('name') or '(uten navn)'}** — {u['email']}{tag}")
-        if link:
-            st.code(link, language=None)
+# ========================================================= E-POSTINNHOLD =======
+if nav == "E-postinnhold" and is_admin:
+    page_header("E-postinnhold", "Rediger de automatiske e-postene. Selgerne ser ikke denne siden.")
+    for kind in ("thankyou", "summary", "report"):
+        d = DEFAULT_CONTENT[kind]
+        cur = get_content(kind)
+        with st.expander(d["label"], expanded=(kind == "thankyou")):
+            with st.form(f"ec_{kind}"):
+                subj = st.text_input("Emne", value=cur["subject"])
+                body = st.text_area("Tekst", value=cur["body"], height=260)
+                st.caption(f"Variabler som fylles automatisk: {d['vars']}")
+                if st.form_submit_button("💾  Lagre", type="primary"):
+                    try:
+                        sb_upsert("email_content", {
+                            "kind": kind, "subject": subj, "body": body,
+                            "updated_at": datetime.now(timezone.utc).isoformat()}, "kind")
+                        st.success("Lagret.")
+                    except Exception as exc:
+                        st.error(f"Kunne ikke lagre: {exc}")
+
+    st.divider()
+    with st.expander("🧪 Send testmail (kontroll før lansering)"):
+        st.caption("Legger en test i kø og sendes av E-postjobben (kjør den i GitHub Actions "
+                   "eller vent inntil 1 time).")
+        tt_to = st.text_input("Send test til", value=email, key="tt_to")
+        tt_kind = st.selectbox("Type", ["thankyou", "summary", "report"],
+                               format_func=lambda k: DEFAULT_CONTENT[k]["label"], key="tt_kind")
+        cur = get_content(tt_kind)
+        if tt_kind == "thankyou":
+            tsub = fill_thanks(cur["subject"], _settings, email)
+            tbody = fill_thanks(cur["body"], _settings, email)
+        elif tt_kind == "summary":
+            demo = {"navn": _settings.get("name") or "Kim", "periode": "13.10 – 17.10",
+                    "antall": "2", "utfall": "Interessert: 1, Vil tenke: 1",
+                    "besok_liste": "- 13.10  Eksempel Bil AS (OSLO) – Interessert\n"
+                                   "- 14.10  Demo Verksted AS (BÆRUM) – Vil tenke"}
+            tsub, tbody = apply_vars(cur["subject"], demo), apply_vars(cur["body"], demo)
         else:
-            st.caption("Ingen lenke ennå – trykk «Ny lenke».")
-        cc = st.columns(2)
-        if cc[0].button("🔄 Ny lenke", key=f"newlink_{u['email']}"):
+            demo = {"selger": email, "bedrift": "Eksempel Bil AS", "orgnr": "999999999",
+                    "adresse": "Eksempelveien 1, 0001 OSLO", "dato": date.today().isoformat(),
+                    "utfall": "Interessert", "rapport": "Testrapport for å kontrollere formatet."}
+            tsub, tbody = apply_vars(cur["subject"], demo), apply_vars(cur["body"], demo)
+        st.caption("Forhåndsvisning:")
+        st.code(tsub, language=None)
+        st.text(tbody)
+        if st.button("📨  Legg testmail i kø"):
             try:
-                sb_upsert("salesperson_settings", {
-                    "email": u["email"], "login_token": _secrets.token_urlsafe(12),
-                    "updated_at": datetime.now(timezone.utc).isoformat()}, "email")
-                st.rerun()
+                sb_insert("email_queue", {
+                    "kind": tt_kind, "to_email": tt_to.strip(),
+                    "subject": "[TEST] " + tsub, "body": tbody,
+                    "send_after": date.today().isoformat(), "payload": {"test": True}})
+                st.success(f"✅ Testmail lagt i kø til {tt_to.strip()}. Kjør «E-postjobb» i "
+                           "GitHub Actions for å sende nå.")
             except Exception as exc:
-                st.error(f"{exc}")
-        if u["email"] not in ADMIN_EMAILS:
-            if cc[1].button("🚫 Steng lenke", key=f"revoke_{u['email']}"):
-                try:
-                    sb_upsert("salesperson_settings", {
-                        "email": u["email"], "login_token": None,
-                        "updated_at": datetime.now(timezone.utc).isoformat()}, "email")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"{exc}")
-        st.divider()
+                st.error(f"Kunne ikke legge i kø: {exc}")
