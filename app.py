@@ -305,6 +305,17 @@ def visited_orgnr_this_month(email):
         return set()
 
 
+def recently_visited(email, days=28):
+    """Org.nr. besøkt de siste N dagene (standard 4 uker) – skjules fra nye forslag."""
+    try:
+        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        rows = sb_get("visits", "orgnr",
+                      {"user_email": f"eq.{email}", "visited_on": f"gte.{cutoff}"})
+        return {str(r["orgnr"]) for r in rows}
+    except Exception:
+        return set()
+
+
 def delete_visit(email, orgnr):
     sb_delete("visits", {"user_email": f"eq.{email}", "orgnr": f"eq.{orgnr}",
                          "month_key": f"eq.{month_key()}"})
@@ -517,83 +528,52 @@ UKEDAGER = ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søn
 _kat_present = [k for k in KATEGORIER if any(c.get("kategori") == k for c in companies)]
 
 
-def plan_route_from(start_txt, dest_txt, hours, visit_min, valgte, orgvalg, maxkm, detour):
-    """Geokod + filtrer + plan_route. Returnerer (start, route, meta) eller (None, msg)."""
-    lat, lon, label = geocode(start_txt) if start_txt else (None, None, start_txt)
-    if not lat:
-        return None, "Fant ikke startadressen. Prøv «gate nr, sted» eller et stedsnavn."
-    dlat = dlon = None
-    if dest_txt and dest_txt.strip():
-        dlat, dlon, _dl = geocode(dest_txt)
-    visited = visited_orgnr_this_month(email)
-    excl = excluded_orgnr(email)
-    _off = {"Kun AS": "AS", "Kun ENK": "ENK"}.get(orgvalg)
-    cands = [c for c in companies
-             if c.get("kategori") in valgte
-             and str(c.get("orgnr")) not in visited
-             and str(c.get("orgnr")) not in excl
-             and (_off is None or c.get("orgform") == _off)]
-    if dlat:
-        base = routing.haversine_km(lat, lon, dlat, dlon)
-        cands = [c for c in cands
-                 if (routing.haversine_km(lat, lon, c["lat"], c["lon"])
-                     + routing.haversine_km(c["lat"], c["lon"], dlat, dlon) - base) <= detour]
-    res = routing.plan_route(lat, lon, cands, hours, visit_minutes=visit_min, max_leg_km=maxkm)
-    return {"lat": lat, "lon": lon, "label": label}, res
-
-
-def plan_trip(start_txt, waypoints, start_date, end_date, hours, visit_min, valgte, orgvalg, maxkm, detour):
-    """Fler-dagers tur: Kim velger periode (fra–til) + stoppesteder i rekkefølge.
-    Appen deler reisen (start → stoppestedene) i geografiske dagsvinduer, ett pr.
-    hverdag i perioden, så turen beveger seg fremover. Returnerer (status, melding)."""
-    slat, slon, slabel = geocode(start_txt) if start_txt else (None, None, start_txt)
-    if not slat:
-        return ("feil", "Fant ikke startadressen. Prøv «gate nr, sted» eller et stedsnavn.")
-    wps = []
-    for lbl in waypoints:
-        la, lo, _l = geocode(lbl)
-        if la:
-            wps.append((la, lo))
-    if not wps:
-        return ("feil", "Fant ingen av stoppestedene. Sjekk adressene.")
-    if end_date < start_date:
-        return ("feil", "Til-datoen må være på eller etter fra-datoen.")
-
-    weekdays = []
-    d = start_date
-    while d <= end_date and len(weekdays) < 60:
-        if d.weekday() < 5:
-            weekdays.append(d)
-        d += timedelta(days=1)
-    if not weekdays:
-        return ("feil", "Ingen hverdager i perioden. Velg et datospenn med hverdager.")
-    D = len(weekdays)
-
-    poly = [(slat, slon)] + wps
-    seg = [routing.haversine_km(poly[i][0], poly[i][1], poly[i + 1][0], poly[i + 1][1])
-           for i in range(len(poly) - 1)]
-    cum0 = [0.0]
+def _poly_cum(points):
+    seg = [routing.haversine_km(points[i][0], points[i][1], points[i + 1][0], points[i + 1][1])
+           for i in range(len(points) - 1)]
+    cum = [0.0]
     for s in seg:
-        cum0.append(cum0[-1] + s)
-    total_len = cum0[-1]
-    if total_len < 1:
-        return ("feil", "Start og stoppestedene er for nær hverandre til en tur.")
+        cum.append(cum[-1] + s)
+    return seg, cum, cum[-1]
 
-    lat0 = sum(p[0] for p in poly) / len(poly)
-    lon0 = poly[0][1]
+
+def _point_at(points, seg, cum, x):
+    if x <= 0 or len(points) == 1:
+        return points[0]
+    for i in range(len(seg)):
+        if x <= cum[i + 1] or i == len(seg) - 1:
+            f = 0.0 if seg[i] == 0 else max(0.0, min(1.0, (x - cum[i]) / seg[i]))
+            a, b = points[i], points[i + 1]
+            return (a[0] + f * (b[0] - a[0]), a[1] + f * (b[1] - a[1]))
+    return points[-1]
+
+
+def _subpoly(points, seg, cum, lo, hi):
+    pts = [_point_at(points, seg, cum, lo)]
+    for i, c in enumerate(cum):
+        if lo < c < hi:
+            pts.append(points[i])
+    pts.append(_point_at(points, seg, cum, hi))
+    out = [pts[0]]
+    for p in pts[1:]:
+        if routing.haversine_km(out[-1][0], out[-1][1], p[0], p[1]) > 0.05:
+            out.append(p)
+    return out if len(out) >= 2 else [pts[0], pts[-1]]
+
+
+def plan_poly(points, cands, hours, visit_min, speed, detour, maxkm, target_n):
+    """Sprer ønsket antall besøk jevnt langs en polylinje (Fra → evt. mellomstopp →
+    Til) og reserverer tid til å rekke frem til siste punkt."""
+    seg, cum, total = _poly_cum(points)
+    res = {"route": [], "total_min": 0, "total_km": round(total, 1), "n_candidates": len(cands)}
+    if total < 0.1:
+        return res
+    lat0, lon0 = points[0]
     kx = 111.320 * math.cos(math.radians(lat0))
     ky = 110.574
-    pxy = [((lon - lon0) * kx, (lat - lat0) * ky) for lat, lon in poly]
-
-    visited = visited_orgnr_this_month(email)
-    excl = excluded_orgnr(email)
-    _off = {"Kun AS": "AS", "Kun ENK": "ENK"}.get(orgvalg)
-    buckets = [[] for _ in range(D)]
-    for c in companies:
-        if (c.get("kategori") not in valgte or str(c.get("orgnr")) in visited
-                or str(c.get("orgnr")) in excl
-                or (_off is not None and c.get("orgform") != _off)):
-            continue
+    pxy = [((lon - lon0) * kx, (lat - lat0) * ky) for lat, lon in points]
+    scored = []
+    for c in cands:
         cx = (c["lon"] - lon0) * kx
         cy = (c["lat"] - lat0) * ky
         best_perp, best_cum = 1e9, 0.0
@@ -602,48 +582,133 @@ def plan_trip(start_txt, waypoints, start_date, end_date, hours, visit_min, valg
             bx, by = pxy[i + 1]
             dx, dy = bx - ax, by - ay
             seg2 = dx * dx + dy * dy
-            t = 0.0 if seg2 == 0 else max(0.0, min(1.0, ((cx - ax) * dx + (cy - ay) * dy) / seg2))
-            perp = math.hypot(cx - (ax + t * dx), cy - (ay + t * dy))
+            tf = 0.0 if seg2 == 0 else max(0.0, min(1.0, ((cx - ax) * dx + (cy - ay) * dy) / seg2))
+            perp = math.hypot(cx - (ax + tf * dx), cy - (ay + tf * dy))
             if perp < best_perp:
-                best_perp, best_cum = perp, cum0[i] + t * seg[i]
+                best_perp, best_cum = perp, cum[i] + tf * seg[i]
         if best_perp <= detour:
-            k = min(D - 1, int(best_cum / total_len * D))
-            buckets[k].append((best_cum, c))
+            scored.append((best_cum, best_perp, c))
+    if not scored:
+        return res
+    n = max(1, min(int(target_n or 6), len(scored), 30))
+    binw = total / n
+    picks, usedc = [], set()
+    for j in range(n):
+        lo = j * binw
+        hi = (j + 1) * binw if j < n - 1 else total + 1
+        inb = [(t, p, c) for (t, p, c) in scored
+               if lo <= t < hi and str(c.get("orgnr")) not in usedc]
+        if inb:
+            inb.sort(key=lambda x: x[1])
+            picks.append(inb[0])
+            usedc.add(str(inb[0][2].get("orgnr")))
+    picks.sort(key=lambda x: x[0])
+    end = points[-1]
+    route, used_min, total_km = [], 0.0, 0.0
+    cur = points[0]
+    for _t, _p, c in picks:
+        leg = routing.haversine_km(cur[0], cur[1], c["lat"], c["lon"])
+        if maxkm and leg > maxkm:
+            continue
+        leg_min = routing.travel_minutes(leg, speed, 1.3)
+        reach = routing.travel_minutes(routing.haversine_km(c["lat"], c["lon"], end[0], end[1]), speed, 1.3)
+        if used_min + leg_min + visit_min + reach > hours * 60:
+            break
+        used_min += leg_min + visit_min
+        total_km += leg
+        route.append({**c, "leg_km": round(leg, 1), "leg_min": round(leg_min),
+                      "visit_min": round(visit_min), "cum_min": round(used_min),
+                      "stop": len(route) + 1})
+        cur = (c["lat"], c["lon"])
+    final = routing.haversine_km(cur[0], cur[1], end[0], end[1])
+    total_km += final
+    used_min += routing.travel_minutes(final, speed, 1.3)
+    res.update({"route": route, "total_min": round(used_min), "total_km": round(total_km, 1)})
+    return res
 
+
+def plan_trip(start_txt, til_txt, vias, from_date, to_date, hours, visit_min, valgte, orgvalg,
+              maxkm, detour, n_visits=None):
+    """Planlegg etappe(r). Fra → evt. mellomstopp → Til, med besøk spredt langs veien.
+    Periode på flere dager deler strekningen i like etapper (én pr. hverdag)."""
+    slat, slon, slabel = geocode(start_txt) if start_txt else (None, None, start_txt)
+    if not slat:
+        return ("feil", "Fant ikke startadressen. Prøv «gate nr, sted» eller et stedsnavn.")
+    if to_date < from_date:
+        return ("feil", "Til-datoen må være på eller etter fra-datoen.")
+    weekdays = []
+    d = from_date
+    while d <= to_date and len(weekdays) < 60:
+        if d.weekday() < 5:
+            weekdays.append(d)
+        d += timedelta(days=1)
+    if not weekdays:
+        return ("feil", "Ingen hverdager i perioden. Velg et datospenn med hverdager.")
+    D = len(weekdays)
+
+    visited = recently_visited(email)
+    excl = excluded_orgnr(email)
+    _off = {"Kun AS": "AS", "Kun ENK": "ENK"}.get(orgvalg)
+    pool = [c for c in companies
+            if c.get("kategori") in valgte and str(c.get("orgnr")) not in visited
+            and str(c.get("orgnr")) not in excl
+            and (_off is None or c.get("orgform") == _off)]
     speed = float(_settings.get("speed_kmh") or 70)
-    made, total_visits = 0, 0
-    prev = {"lat": slat, "lon": slon, "label": slabel}
+
+    if not (til_txt and til_txt.strip()):
+        # Uten destinasjon: område-plan rundt start (dedup pr. dag).
+        used, made, total_visits = set(), 0, 0
+        for day in weekdays:
+            cands = [c for c in pool if str(c.get("orgnr")) not in used]
+            res = routing.plan_route(slat, slon, cands, hours,
+                                     visit_minutes=visit_min, max_leg_km=maxkm)
+            route = res["route"]
+            if n_visits:
+                route = route[:int(n_visits)]
+            for s in route:
+                used.add(str(s.get("orgnr")))
+            if route:
+                save_plan(email, day, {"lat": slat, "lon": slon, "label": slabel}, route, {
+                    "total_min": res["total_min"], "total_km": res["total_km"],
+                    "n_candidates": res["n_candidates"]})
+                made += 1
+                total_visits += len(route)
+        if made == 0:
+            return ("tom", "Fant ingen bedrifter med disse valgene. Prøv flere bransjer.")
+        return ("ok", f"{made} dag(er) planlagt med til sammen {total_visits} besøk.")
+
+    tlat, tlon, tlabel = geocode(til_txt)
+    if not tlat:
+        return ("feil", "Fant ikke destinasjonen (Til). Prøv «gate nr, sted» eller et stedsnavn.")
+    poly = [(slat, slon)]
+    for v in (vias or []):
+        va, vo, _vl = geocode(v)
+        if va:
+            poly.append((va, vo))
+    poly.append((tlat, tlon))
+    seg, cum, total = _poly_cum(poly)
+    if total < 1:
+        return ("feil", "Fra og Til er for nær hverandre.")
+
+    used, made, total_visits = set(), 0, 0
     for k, day in enumerate(weekdays):
-        items = sorted(buckets[k], key=lambda x: x[0])
-        route, used_min, total_km = [], 0.0, 0.0
-        cur = (prev["lat"], prev["lon"])
-        first = True
-        for _cum, c in items:
-            leg = routing.haversine_km(cur[0], cur[1], c["lat"], c["lon"])
-            if not first and maxkm and leg > maxkm:
-                continue
-            leg_min = routing.travel_minutes(leg, speed, 1.3)
-            if used_min + leg_min + visit_min > hours * 60:
-                break
-            used_min += leg_min + visit_min
-            total_km += leg
-            route.append({**c, "leg_km": round(leg, 1), "leg_min": round(leg_min),
-                          "visit_min": round(visit_min), "cum_min": round(used_min),
-                          "stop": len(route) + 1})
-            cur = (c["lat"], c["lon"])
-            first = False
+        sub = _subpoly(poly, seg, cum, k / D * total, (k + 1) / D * total)
+        flabel = slabel if k == 0 else "(underveis)"
+        cands = [c for c in pool if str(c.get("orgnr")) not in used]
+        res = plan_poly(sub, cands, hours, visit_min, speed, detour, maxkm, n_visits)
+        route = res["route"]
+        for s in route:
+            used.add(str(s.get("orgnr")))
         if route:
-            save_plan(email, day, prev, route, {
-                "total_min": round(used_min), "total_km": round(total_km, 1),
-                "n_candidates": len(items)})
+            save_plan(email, day, {"lat": sub[0][0], "lon": sub[0][1], "label": flabel}, route, {
+                "total_min": res["total_min"], "total_km": res["total_km"],
+                "n_candidates": res["n_candidates"]})
             made += 1
             total_visits += len(route)
-            prev = {"lat": route[-1]["lat"], "lon": route[-1]["lon"],
-                    "label": route[-1].get("navn")}
     if made == 0:
         return ("tom", "Fant ingen bedrifter langs ruta med disse valgene. "
                        "Prøv flere bransjer eller større omvei.")
-    return ("ok", f"{made} dager planlagt med til sammen {total_visits} besøk.")
+    return ("ok", f"{made} dag(er) planlagt med til sammen {total_visits} besøk langs ruta.")
 
 
 # -------------------------------------------------- dialog: registrer besøk ---
@@ -727,59 +792,6 @@ def route_map(start, route):
             tooltip={"text": "{label}. {navn}"}))
     except Exception:
         st.map([{"lat": p["lat"], "lon": p["lon"]} for p in route])
-
-
-@st.dialog("Planlegg rute")
-def plan_dialog(d):
-    try:
-        wd = UKEDAGER[d.weekday()].capitalize()
-    except Exception:
-        wd = ""
-    st.markdown(f"**{wd} {d.strftime('%d.%m.%Y')}**")
-    existing = get_plan(email, d)
-    if existing and existing.get("companies"):
-        st.success(f"📅 {len(existing['companies'])} besøk er planlagt denne dagen.")
-        if st.button("🗑️ Slett denne ruten", use_container_width=True):
-            try:
-                delete_plan(email, d.isoformat())
-                st.session_state["_toast"] = "Planlagt rute slettet."
-                st.rerun()
-            except Exception as exc:
-                st.error(f"{exc}")
-        st.divider()
-        st.caption("Planlegg på nytt under (erstatter ruten):")
-    start_txt = st.text_input("Fra (startadresse)", value=_settings.get("start_label", ""),
-                              placeholder="Adresse eller sted")
-    dest_txt = st.text_input("Til (valgfritt)", placeholder="F.eks. Sarpsborg – drop-in langs ruta")
-    cc1, cc2 = st.columns(2)
-    hours = cc1.number_input("Timer på veien", 1.0, 12.0, float(_settings.get("hours_per_day") or 7), 0.5)
-    visit_min = cc2.number_input("Snitt pr. besøk (min)", 10, 180, int(_settings.get("avg_visit_minutes") or 60), 5)
-    velg_alle = st.checkbox("Velg alle bransjer")
-    valgte_cat = st.multiselect("Bransjer", _kat_present, default=[])
-    orgvalg = st.radio("Selskapsform", ["AS + ENK", "Kun AS", "Kun ENK"], horizontal=True)
-    cc3, cc4 = st.columns(2)
-    maxkm = cc3.slider("Maks avstand mellom besøk (km)", 10, 300, 120, 10)
-    detour = cc4.slider("Maks omvei fra strekning (km)", 2, 50, 10)
-    if st.button("🧭  Foreslå & lagre rute", type="primary", use_container_width=True):
-        valgte = _kat_present if velg_alle else valgte_cat
-        if not valgte:
-            st.warning("Velg minst én bransje – eller huk av «Velg alle bransjer».")
-        else:
-            start, res = plan_route_from(start_txt, dest_txt, hours, visit_min,
-                                         valgte, orgvalg, maxkm, detour)
-            if start is None:
-                st.error(res)
-            elif not res["route"]:
-                st.warning("Fant ingen bedrifter med disse valgene. Prøv flere bransjer eller større omvei.")
-            else:
-                try:
-                    save_plan(email, d, start, res["route"], {
-                        "total_min": res["total_min"], "total_km": res["total_km"],
-                        "n_candidates": res["n_candidates"]})
-                    st.session_state["_toast"] = f"✅ Rute lagret til {d.isoformat()} ({len(res['route'])} besøk)."
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Kunne ikke lagre: {exc}")
 
 
 # ============================================================== MIN DAG =======
@@ -886,76 +898,13 @@ if nav == "Drop-in":
 
 # ============================================================ PLANLEGGING ======
 if nav == "Planlegging":
-    page_header("Planlegging", "Planlegg en hel tur, eller klikk en dato i kalenderen. "
-                "Dagens rute vises automatisk i «Min dag».")
+    page_header("Planlegging", "Klikk fra-dato og til-dato i kalenderen – så legger du inn ruta under.")
     today = date.today()
+    ss = st.session_state
+    ss.setdefault("sel_from", None)
+    ss.setdefault("sel_to", None)
+    ss.setdefault("cal_ym", (today.year, today.month))
 
-    with st.expander("🧳 Planlegg tur (flere dager)"):
-        st.caption("Velg periode (fra–til) og legg inn stoppestedene du skal innom i "
-                   "rekkefølge (f.eks. Lillehammer → Oslo → Sandefjord). Appen fordeler "
-                   "besøkene utover hverdagene i perioden, så turen beveger seg fremover "
-                   "langs ruta.")
-        tstart = st.text_input("Startadresse", value=_settings.get("start_label", ""),
-                               placeholder="F.eks. Lillehammer", key="trip_start")
-        trange = st.date_input("Periode (fra – til)", value=(today, today + timedelta(days=3)),
-                               min_value=today, format="DD.MM.YYYY", key="trip_range")
-        st.markdown("**Stoppesteder underveis (i rekkefølge)**")
-        if "trip_stops" not in st.session_state:
-            st.session_state["trip_stops"] = [1]
-            st.session_state["trip_next"] = 2
-        for n, sid in enumerate(st.session_state["trip_stops"]):
-            rc = st.columns([6, 1])
-            rc[0].text_input(f"Stoppested {n + 1}", key=f"trip_sted_{sid}",
-                             placeholder="F.eks. Oslo", label_visibility="collapsed")
-            if rc[1].button("🗑️", key=f"trip_del_{sid}", use_container_width=True,
-                            help="Fjern stoppested"):
-                st.session_state["trip_stops"].remove(sid)
-                st.session_state.pop(f"trip_sted_{sid}", None)
-                st.rerun()
-        if st.button("➕ Legg til stoppested", use_container_width=True):
-            st.session_state["trip_stops"].append(st.session_state["trip_next"])
-            st.session_state["trip_next"] += 1
-            st.rerun()
-
-        st.write("")
-        c1, c2 = st.columns(2)
-        thours = c1.number_input("Timer pr. dag", 1.0, 12.0,
-                                 float(_settings.get("hours_per_day") or 7), 0.5, key="trip_hours")
-        tvisit = c2.number_input("Snitt pr. besøk (min)", 10, 180,
-                                 int(_settings.get("avg_visit_minutes") or 60), 5, key="trip_visit")
-        tall = st.checkbox("Velg alle bransjer", key="trip_all")
-        tcat = st.multiselect("Bransjer", _kat_present, default=[], key="trip_cat")
-        torg = st.radio("Selskapsform", ["AS + ENK", "Kun AS", "Kun ENK"], horizontal=True, key="trip_org")
-        c3, c4 = st.columns(2)
-        tmax = c3.slider("Maks avstand mellom besøk (km)", 10, 300, 120, 10, key="trip_max")
-        tdet = c4.slider("Maks omvei fra strekning (km)", 2, 60, 15, key="trip_det")
-        if st.button("🧳  Planlegg hele turen", type="primary", key="trip_go"):
-            valgte = _kat_present if tall else tcat
-            har_periode = isinstance(trange, (list, tuple)) and len(trange) == 2
-            waypoints = [str(st.session_state.get(f"trip_sted_{sid}") or "").strip()
-                         for sid in st.session_state["trip_stops"]]
-            waypoints = [w for w in waypoints if w]
-            if not valgte:
-                st.warning("Velg minst én bransje – eller huk av «Velg alle bransjer».")
-            elif not waypoints:
-                st.warning("Legg inn minst ett stoppested.")
-            elif not har_periode:
-                st.warning("Velg både fra- og til-dato i perioden.")
-            else:
-                status, msg = plan_trip(tstart, waypoints, trange[0], trange[1],
-                                        thours, tvisit, valgte, torg, tmax, tdet)
-                if status == "ok":
-                    st.success(f"✅ {msg} Se kalenderen og «Kommende ruter» under.")
-                    st.rerun()
-                elif status == "tom":
-                    st.warning(msg)
-                else:
-                    st.error(msg)
-
-    st.divider()
-    if "cal_ym" not in st.session_state:
-        st.session_state["cal_ym"] = (today.year, today.month)
-    cy, cm = st.session_state["cal_ym"]
     try:
         allplans = sb_get("planned_routes", "plan_date,companies",
                           {"user_email": f"eq.{email}", "order": "plan_date.asc"})
@@ -965,20 +914,22 @@ if nav == "Planlegging":
     MND = ["januar", "februar", "mars", "april", "mai", "juni", "juli", "august",
            "september", "oktober", "november", "desember"]
 
+    cy, cm = ss["cal_ym"]
     nc1, nc2, nc3 = st.columns([1, 3, 1])
     if nc1.button("‹ Forrige", use_container_width=True):
-        st.session_state["cal_ym"] = (cy - 1, 12) if cm == 1 else (cy, cm - 1)
+        ss["cal_ym"] = (cy - 1, 12) if cm == 1 else (cy, cm - 1)
         st.rerun()
     nc2.markdown(f"<h3 style='text-align:center;margin:4px 0'>{MND[cm-1].capitalize()} {cy}</h3>",
                  unsafe_allow_html=True)
     if nc3.button("Neste ›", use_container_width=True):
-        st.session_state["cal_ym"] = (cy + 1, 1) if cm == 12 else (cy, cm + 1)
+        ss["cal_ym"] = (cy + 1, 1) if cm == 12 else (cy, cm + 1)
         st.rerun()
 
     hdr = st.columns(7)
     for i, wd in enumerate(["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"]):
         hdr[i].markdown(f"<div style='text-align:center;color:#6a7488;font-size:12px;"
                         f"font-weight:600'>{wd}</div>", unsafe_allow_html=True)
+    sf, stt = ss["sel_from"], ss["sel_to"]
     for week in _cal.Calendar(firstweekday=0).monthdatescalendar(cy, cm):
         cols = st.columns(7)
         for i, d in enumerate(week):
@@ -986,13 +937,99 @@ if nav == "Planlegging":
                 if d.month != cm:
                     st.markdown(f"<div style='text-align:center;color:#c5ccd6;padding:9px 0'>"
                                 f"{d.day}</div>", unsafe_allow_html=True)
+                    continue
+                in_sel = bool(sf and ((stt and sf <= d <= stt) or (not stt and d == sf)))
+                cnt = plandates.get(d.isoformat())
+                lbl = f"{d.day}" + (f"  ·{cnt}📍" if cnt else "")
+                if st.button(lbl, key=f"cal_{d.isoformat()}", use_container_width=True,
+                             type=("primary" if in_sel else "secondary")):
+                    if ss["sel_from"] is None or ss["sel_to"] is not None:
+                        ss["sel_from"] = d
+                        ss["sel_to"] = d
+                    elif d >= ss["sel_from"]:
+                        ss["sel_to"] = d
+                    else:
+                        ss["sel_from"] = d
+                        ss["sel_to"] = d
+                    st.rerun()
+    st.caption("📍 = dag med planlagt rute. Klikk én dato, så en til, for en periode.")
+
+    # --- Planleggingsskjema for valgt periode ---
+    if ss["sel_from"]:
+        fr = ss["sel_from"]
+        to = ss["sel_to"] or fr
+        flerdag = fr != to
+        if flerdag:
+            rngtxt = f"{fr.strftime('%d.%m')} – {to.strftime('%d.%m.%Y')}"
+        else:
+            rngtxt = f"{UKEDAGER[fr.weekday()].capitalize()} {fr.strftime('%d.%m.%Y')}"
+        st.divider()
+        with st.container(border=True):
+            hc = st.columns([4, 1])
+            hc[0].markdown(f"#### 🗓️ Planlegg {rngtxt}")
+            if hc[1].button("Nullstill", use_container_width=True):
+                ss["sel_from"] = None
+                ss["sel_to"] = None
+                st.rerun()
+            cst1, cst2 = st.columns(2)
+            tstart = cst1.text_input("Fra (startadresse)", value=_settings.get("start_label", ""),
+                                     placeholder="F.eks. Lillehammer", key="pl_start")
+            ttil = cst2.text_input("Til (destinasjon, valgfritt)", placeholder="F.eks. Oslo",
+                                   key="pl_til",
+                                   help="Fyll ut for å besøke bedrifter LANGS veien fra Fra til Til. "
+                                        "La stå tomt for å jobbe området rundt Fra.")
+            # Valgfrie mellomstopp (underveis fra Fra til Til).
+            if "pl_vias" not in ss:
+                ss["pl_vias"] = []
+            if ss["pl_vias"]:
+                st.caption("Mellomstopp underveis (i rekkefølge):")
+            for i in range(len(ss["pl_vias"])):
+                vc = st.columns([6, 1])
+                ss["pl_vias"][i] = vc[0].text_input(
+                    f"Mellomstopp {i + 1}", value=ss["pl_vias"][i],
+                    placeholder="F.eks. Gjøvik", key=f"pl_via_{i}", label_visibility="collapsed")
+                if vc[1].button("✕", key=f"pl_via_del_{i}", use_container_width=True):
+                    ss["pl_vias"].pop(i)
+                    st.rerun()
+            if st.button("➕ Legg til mellomstopp", key="pl_via_add"):
+                ss["pl_vias"].append("")
+                st.rerun()
+            c1, c2, c3 = st.columns(3)
+            antall = c1.number_input("Antall besøk pr. dag", 1, 20, 6, 1, key="pl_antall",
+                                     help="Hvor mange bedrifter du vil besøke (spres jevnt langs ruta).")
+            thours = c2.number_input("Timer pr. dag", 1.0, 12.0,
+                                     float(_settings.get("hours_per_day") or 7), 0.5, key="pl_hours")
+            tvisit = c3.number_input("Snitt pr. besøk (min)", 10, 180,
+                                     int(_settings.get("avg_visit_minutes") or 60), 5, key="pl_visit")
+            tall = st.checkbox("Velg alle bransjer", key="pl_all")
+            tcat = st.multiselect("Bransjer", _kat_present, default=[], key="pl_cat")
+            torg = st.radio("Selskapsform", ["AS + ENK", "Kun AS", "Kun ENK"], horizontal=True, key="pl_org")
+            c4, c5 = st.columns(2)
+            tmax = c4.slider("Maks avstand mellom besøk (km)", 10, 300, 120, 10, key="pl_max")
+            tdet = c5.slider("Maks omvei fra strekning (km)", 2, 60, 15, key="pl_det")
+            if flerdag and ttil.strip():
+                st.caption(f"Strekningen {tstart or 'start'} → {ttil} fordeles på de "
+                           f"{(to - fr).days + 1} dagene i perioden.")
+            if st.button("🧭  Lag rute(r)", type="primary", key="pl_go"):
+                valgte = _kat_present if tall else tcat
+                if not valgte:
+                    st.warning("Velg minst én bransje – eller huk av «Velg alle bransjer».")
                 else:
-                    cnt = plandates.get(d.isoformat())
-                    lbl = f"{d.day}" + (f"  ·{cnt}📍" if cnt else "")
-                    if st.button(lbl, key=f"cal_{d.isoformat()}", use_container_width=True,
-                                 type=("primary" if d == today else "secondary")):
-                        plan_dialog(d)
-    st.caption("📍 = dag med planlagt rute. Blå dato = i dag.")
+                    vias = [v.strip() for v in ss.get("pl_vias", []) if v and v.strip()]
+                    status, msg = plan_trip(tstart, ttil, vias, fr, to, thours, tvisit,
+                                            valgte, torg, tmax, tdet, n_visits=int(antall))
+                    if status == "ok":
+                        ss["sel_from"] = None
+                        ss["sel_to"] = None
+                        ss["pl_vias"] = []
+                        st.session_state["_toast"] = f"✅ {msg}"
+                        st.rerun()
+                    elif status == "tom":
+                        st.warning(msg)
+                    else:
+                        st.error(msg)
+    else:
+        st.info("Klikk en dato i kalenderen (og evt. en til-dato) for å planlegge en rute.")
 
     st.divider()
     st.markdown("#### Kommende ruter")
@@ -1012,8 +1049,12 @@ if nav == "Planlegging":
                 st.markdown(f"- **{s.get('stop','')}. {s.get('navn','')}** "
                             f"<span class='bnc-sub'>({s.get('poststed','')})</span>",
                             unsafe_allow_html=True)
-            if dt and st.button("✏️ Endre / slett", key=f"edit_{d}"):
-                plan_dialog(dt)
+            if st.button("🗑️ Slett ruten", key=f"delp_{d}"):
+                try:
+                    delete_plan(email, d)
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"{exc}")
 
 
 # ============================================================= HISTORIKK ======
