@@ -945,12 +945,12 @@ if nav == "Planlegging":
                              type=("primary" if in_sel else "secondary")):
                     if ss["sel_from"] is None or ss["sel_to"] is not None:
                         ss["sel_from"] = d
-                        ss["sel_to"] = d
+                        ss["sel_to"] = None
                     elif d >= ss["sel_from"]:
                         ss["sel_to"] = d
                     else:
                         ss["sel_from"] = d
-                        ss["sel_to"] = d
+                        ss["sel_to"] = None
                     st.rerun()
     st.caption("📍 = dag med planlagt rute. Klikk én dato, så en til, for en periode.")
 
