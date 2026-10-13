@@ -836,8 +836,8 @@ def leaflet_route_html(start, route, height=360, line_color="#1b2a4a"):
 <body><div id="map"></div><script>
 var pts=__DATA__, line="__LINE__";
 var map=L.map('map',{scrollWheelZoom:false});
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
- {maxZoom:19,attribution:'© OpenStreetMap, © CARTO'}).addTo(map);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+ {maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
 var ll=pts.map(function(p){return [p.lat,p.lon];});
 L.polyline(ll,{color:line,weight:4}).addTo(map);
 function ic(l,c){return L.divIcon({className:'',iconSize:[24,24],iconAnchor:[12,12],
