@@ -795,6 +795,76 @@ def route_map(start, route):
         st.map([{"lat": p["lat"], "lon": p["lon"]} for p in route])
 
 
+DAY_COLORS = [[27, 42, 74], [192, 57, 43], [31, 157, 91], [230, 126, 34],
+              [142, 68, 173], [41, 128, 185], [22, 160, 133], [212, 172, 13]]
+
+
+def multi_route_map(plans):
+    """Samlet kart for en flerdagstur: én farge per dag, nummererte stopp."""
+    try:
+        import pydeck as pdk
+        paths, pts = [], []
+        all_lat, all_lon = [], []
+        for di, p in enumerate(plans):
+            comps = p.get("companies") or []
+            start = p.get("start") or {}
+            col = DAY_COLORS[di % len(DAY_COLORS)]
+            dt = datetime.fromisoformat(p["plan_date"]).date()
+            dag = f"{UKEDAGER[dt.weekday()].capitalize()} {dt.strftime('%d.%m')}"
+            line = []
+            if start.get("lat") is not None:
+                line.append([start["lon"], start["lat"]])
+                all_lat.append(start["lat"])
+                all_lon.append(start["lon"])
+            for s in comps:
+                if s.get("lat") is None:
+                    continue
+                line.append([s["lon"], s["lat"]])
+                all_lat.append(s["lat"])
+                all_lon.append(s["lon"])
+                pts.append({"lat": s["lat"], "lon": s["lon"], "navn": s.get("navn", ""),
+                            "label": str(s.get("stop", "")), "dag": dag, "color": col})
+            if len(line) >= 2:
+                paths.append({"path": line, "color": col})
+        if not pts:
+            st.caption("Ingen punkter å vise på kart.")
+            return
+        span = max(max(all_lat) - min(all_lat), max(all_lon) - min(all_lon))
+        zoom = (11 if span < 0.15 else 10 if span < 0.3 else 9 if span < 0.6 else
+                8 if span < 1.2 else 7 if span < 2.5 else 6 if span < 5 else 5)
+        st.pydeck_chart(pdk.Deck(
+            map_style=None,
+            initial_view_state=pdk.ViewState(latitude=sum(all_lat) / len(all_lat),
+                                             longitude=sum(all_lon) / len(all_lon), zoom=zoom),
+            layers=[
+                pdk.Layer("PathLayer", data=paths, get_path="path", get_color="color",
+                          get_width=4, width_min_pixels=3),
+                pdk.Layer("ScatterplotLayer", data=pts, get_position=["lon", "lat"],
+                          get_fill_color="color", get_radius=300,
+                          radius_min_pixels=8, radius_max_pixels=18, pickable=True),
+                pdk.Layer("TextLayer", data=pts, get_position=["lon", "lat"],
+                          get_text="label", get_size=12, get_color=[255, 255, 255],
+                          get_alignment_baseline="'center'"),
+            ],
+            tooltip={"text": "{dag} · {label}. {navn}"}))
+        # fargeforklaring per dag
+        chips = []
+        for di, p in enumerate(plans):
+            if not (p.get("companies") or []):
+                continue
+            c = DAY_COLORS[di % len(DAY_COLORS)]
+            dt = datetime.fromisoformat(p["plan_date"]).date()
+            chips.append(f"<span style='display:inline-block;margin:2px 10px 2px 0'>"
+                         f"<span style='display:inline-block;width:11px;height:11px;border-radius:3px;"
+                         f"background:rgb({c[0]},{c[1]},{c[2]});margin-right:5px'></span>"
+                         f"{UKEDAGER[dt.weekday()].capitalize()} {dt.strftime('%d.%m')}</span>")
+        st.markdown("<div style='font-size:13px'>" + "".join(chips) + "</div>",
+                    unsafe_allow_html=True)
+    except Exception:
+        st.map([{"lat": pp["lat"], "lon": pp["lon"]}
+                for p in plans for pp in (p.get("companies") or []) if pp.get("lat") is not None])
+
+
 # ============================================================== MIN DAG =======
 if nav == "Min dag":
     today = date.today()
@@ -924,7 +994,7 @@ if nav == "Planlegging":
     ss.setdefault("cal_ym", (today.year, today.month))
 
     try:
-        allplans = sb_get("planned_routes", "plan_date,companies",
+        allplans = sb_get("planned_routes", "plan_date,companies,start,meta",
                           {"user_email": f"eq.{email}", "order": "plan_date.asc"})
     except Exception:
         allplans = []
@@ -1054,6 +1124,13 @@ if nav == "Planlegging":
     upcoming = [p for p in allplans if p["plan_date"] >= today.isoformat()]
     if not upcoming:
         st.caption("Ingen kommende ruter ennå – klikk en dato i kalenderen for å lage en.")
+    if len(upcoming) > 1:
+        tot_km_all = round(sum(float((p.get("meta") or {}).get("total_km") or 0)
+                               for p in upcoming), 1)
+        n_all = sum(len(p.get("companies") or []) for p in upcoming)
+        st.markdown(f"**🗺️ Hele turen** — {len(upcoming)} dager · {n_all} besøk · ≈ {tot_km_all} km")
+        multi_route_map(upcoming)
+        st.write("")
     for p in upcoming:
         d = p["plan_date"]
         comps = p.get("companies") or []
