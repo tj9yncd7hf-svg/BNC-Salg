@@ -1842,6 +1842,15 @@ if nav == "Innstillinger":
             ex = []
         if not ex:
             st.caption("Ingen bedrifter er ekskludert.")
+        else:
+            if st.button(f"↩︎ Angre alle ({len(ex)})", key="unx_all",
+                         help="Fjern alle fra ekskludert-lista – de kan foreslås igjen"):
+                try:
+                    sb_delete("excluded", {"user_email": f"eq.{email}"})
+                    st.session_state["_toast"] = "Alle ekskluderte bedrifter er gjenåpnet."
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"{exc}")
         for e in ex:
             xc = st.columns([5, 2])
             xc[0].write(f"{e.get('navn','')}  ({e.get('orgnr','')})")
