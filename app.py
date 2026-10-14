@@ -1367,18 +1367,25 @@ if nav == "Drop-in":
                            placeholder="Skriv navn eller org.nr …", label_visibility="collapsed")
         sc2.form_submit_button("🔍 Søk", use_container_width=True)
     if q:
-        ql = q.strip().lower()
+        toks = [t for t in q.strip().lower().split() if t]
         qd = "".join(ch for ch in q if ch.isdigit())
-        hits = [c for c in companies
-                if ql in str(c.get("navn", "")).lower()
-                or (qd and len(qd) >= 3 and qd in str(c.get("orgnr", "")))][:25]
+
+        def _match(c):
+            hay = (f"{c.get('navn','')} {c.get('poststed','')} "
+                   f"{c.get('adresse','')}").lower()
+            if toks and all(t in hay for t in toks):
+                return True
+            return bool(qd and len(qd) >= 3 and qd in str(c.get("orgnr", "")))
+
+        hits = [c for c in companies if _match(c)][:25]
         if not hits:
-            st.caption("Ingen treff.")
+            st.caption("Ingen treff. Prøv færre ord, eller søk på org./bedr.nr.")
         for c in hits:
             cc = st.columns([5, 2])
             cc[0].markdown(f"**{c.get('navn','')}**  \n"
                            f"<span class='bnc-sub'>{c.get('kategori','')} · "
-                           f"{c.get('poststed','')}</span>", unsafe_allow_html=True)
+                           f"{c.get('poststed','')} · nr {c.get('orgnr','')}</span>",
+                           unsafe_allow_html=True)
             if cc[1].button("📝 Registrer", key=f"d_{c.get('orgnr')}", use_container_width=True):
                 register_dialog(c)
     else:
