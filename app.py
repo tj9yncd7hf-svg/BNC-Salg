@@ -899,6 +899,9 @@ def register_dialog(company):
         contact = st.text_input("Kundens e-post", value=company.get("epost", ""))
         send_thanks = st.checkbox("Send «takk for praten» (går ut 2 virkedager etter)",
                                   value=bool(company.get("epost")))
+        no_more = st.checkbox("🚫 Ikke besøk denne kunden igjen",
+                              help="Skjuler bedriften permanent fra framtidige forslag. "
+                                   "Kan angres under Innstillinger → Ekskluderte bedrifter.")
         lagre_besok = st.form_submit_button("💾  Lagre besøk og send rapport", type="primary",
                                             use_container_width=True)
     if lagre_besok:
@@ -933,7 +936,11 @@ def register_dialog(company):
                     "body": fill_thanks(tc["body"], _settings, email),
                     "send_after": add_business_days(today, 2).isoformat(),
                     "payload": {"navn": company.get("navn", ""), "selger": email}})
-            st.session_state["_toast"] = "✅ Besøk registrert – rapport sendt, bedriften er merket besøkt."
+            if no_more:
+                exclude_company(email, company)
+            _m = "✅ Besøk registrert – rapport sendt."
+            st.session_state["_toast"] = _m + (" Kunden skjules fra framtidige forslag."
+                                               if no_more else " Bedriften er merket besøkt.")
             st.rerun()
         except Exception as exc:
             st.error(f"Kunne ikke lagre: {exc}")
