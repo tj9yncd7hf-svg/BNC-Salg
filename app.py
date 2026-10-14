@@ -215,18 +215,21 @@ st.markdown("""
   @media (max-width: 900px){
     section[data-testid="stSidebar"]{ display:none !important }
     [data-testid="stSidebarCollapsedControl"]{ display:none !important }
-    .block-container{ padding-top:58px !important; padding-bottom:86px !important }
+    .block-container{ padding-top:56px !important;
+      padding-bottom:calc(86px + env(safe-area-inset-bottom)) !important }
     .st-key-bnc_topbar{ position:fixed; top:0; left:0; right:0; z-index:1000; background:#1b2a4a;
-      padding:4px 10px !important; box-shadow:0 1px 6px rgba(0,0,0,.25) }
-    .st-key-bnc_topbar .bnc-topname{ color:#fff; font-family:'Archivo',sans-serif; font-weight:700;
-      font-size:17px; line-height:40px }
+      padding:4px 12px !important; box-shadow:0 1px 6px rgba(0,0,0,.25) }
+    .st-key-bnc_topbar [data-testid="stImage"]{ margin:2px 0 !important }
+    .st-key-bnc_topbar img{ max-height:36px !important; width:auto !important }
     .st-key-bnc_topbar button{ background:transparent !important; border:none !important;
-      color:#fff !important; font-size:18px !important; padding:4px 0 !important }
+      color:#fff !important; font-size:19px !important; padding:4px 0 !important }
     .st-key-bnc_bnav{ position:fixed; bottom:0; left:0; right:0; z-index:1000; background:#fff;
-      border-top:1px solid #e3e8f0; padding:4px 4px !important; box-shadow:0 -1px 10px rgba(0,0,0,.08) }
+      border-top:1px solid #e3e8f0; box-shadow:0 -1px 10px rgba(0,0,0,.08);
+      padding:4px 4px calc(4px + env(safe-area-inset-bottom)) !important }
+    /* fallback-knapper (uten option_menu) */
     .st-key-bnc_bnav button{ font-size:10.5px !important; font-weight:600 !important;
-      padding:5px 0 !important; min-height:48px; border:none !important; background:transparent !important;
-      color:#8892a4 !important; line-height:1.25 }
+      padding:5px 0 !important; min-height:48px; border:none !important;
+      background:transparent !important; color:#8892a4 !important; line-height:1.25 }
     .st-key-bnc_bnav button[kind="primary"]{ color:#1b2a4a !important; background:#eef2f8 !important;
       border-radius:10px !important }
   }
@@ -2082,7 +2085,8 @@ if nav == "E-postinnhold" and is_admin:
 # Vises bare på mobil (skjult på desktop via CSS). Sidemenyen skjules på mobil.
 with st.container(key="bnc_topbar"):
     tb = st.columns([5, 1, 1])
-    tb[0].markdown("<div class='bnc-topname'>BNC Selger</div>", unsafe_allow_html=True)
+    with tb[0]:
+        _logo(LOGO_WHITE, 92)
     if tb[1].button("⚙️", key="top_innst", help="Innstillinger"):
         st.session_state["_goto"] = "Innstillinger"
         st.rerun()
@@ -2093,10 +2097,29 @@ with st.container(key="bnc_topbar"):
         st.rerun()
 
 with st.container(key="bnc_bnav"):
-    _bn = [("Min dag", "🗺️"), ("Drop-in", "📋"), ("Planlegging", "📅"), ("Historikk", "🕑")]
-    _bc = st.columns(len(_bn))
-    for _i, (_pg, _ic) in enumerate(_bn):
-        if _bc[_i].button(f"{_ic} {_pg}", key=f"bn_{_pg}", use_container_width=True,
-                          type=("primary" if nav == _pg else "secondary")):
-            st.session_state["_goto"] = _pg
-            st.rerun()
+    _bpages = ["Min dag", "Drop-in", "Planlegging", "Historikk"]
+    if HAS_OPTION_MENU:
+        _bidx = _bpages.index(nav) if nav in _bpages else 0
+        _bsel = option_menu(
+            None, _bpages, icons=[PAGE_ICONS[p] for p in _bpages],
+            orientation="horizontal", default_index=_bidx, key="bnav_menu",
+            styles={
+                "container": {"background-color": "#ffffff", "padding": "0!important"},
+                "nav-link": {"color": "#8892a4", "font-size": "10.5px", "font-weight": "600",
+                             "text-align": "center", "margin": "0 1px", "padding": "5px 2px",
+                             "--hover-color": "#eef2f8"},
+                "nav-link-selected": {"background-color": "#eef2f8", "color": "#1b2a4a"},
+                "icon": {"font-size": "18px", "display": "block", "margin": "0 0 2px 0"},
+            })
+        if _bsel != st.session_state.get("_last_bnav"):
+            st.session_state["_last_bnav"] = _bsel
+            if _bsel != nav:
+                st.session_state["_goto"] = _bsel
+                st.rerun()
+    else:
+        _bc = st.columns(len(_bpages))
+        for _i, _pg in enumerate(_bpages):
+            if _bc[_i].button(_pg, key=f"bn_{_pg}", use_container_width=True,
+                              type=("primary" if nav == _pg else "secondary")):
+                st.session_state["_goto"] = _pg
+                st.rerun()
