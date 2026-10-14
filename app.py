@@ -212,17 +212,23 @@ st.markdown("""
   @media (min-width: 901px){
     .st-key-bnc_topbar, .st-key-bnc_bnav{ display:none !important }
   }
+  /* Skjul anker-lenke-ikon (🔗) på overskrifter overalt */
+  [data-testid="stHeaderActionElements"]{ display:none !important }
   @media (max-width: 900px){
     section[data-testid="stSidebar"]{ display:none !important }
-    [data-testid="stSidebarCollapsedControl"]{ display:none !important }
-    .block-container{ padding-top:56px !important;
-      padding-bottom:calc(86px + env(safe-area-inset-bottom)) !important }
+    header[data-testid="stHeader"]{ display:none !important }
+    [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"]{ display:none !important }
+    .block-container{ padding-top:58px !important;
+      padding-bottom:calc(90px + env(safe-area-inset-bottom)) !important }
     .st-key-bnc_topbar{ position:fixed; top:0; left:0; right:0; z-index:1000; background:#1b2a4a;
-      padding:4px 12px !important; box-shadow:0 1px 6px rgba(0,0,0,.25) }
+      padding:4px 12px !important; box-shadow:0 1px 6px rgba(0,0,0,.25);
+      display:flex; align-items:center }
     .st-key-bnc_topbar [data-testid="stImage"]{ margin:2px 0 !important }
-    .st-key-bnc_topbar img{ max-height:36px !important; width:auto !important }
-    .st-key-bnc_topbar button{ background:transparent !important; border:none !important;
-      color:#fff !important; font-size:19px !important; padding:4px 0 !important }
+    .st-key-bnc_topbar img{ max-height:34px !important; width:auto !important }
+    .st-key-bnc_topbar button{ background:transparent !important;
+      border:1px solid rgba(255,255,255,.4) !important; color:#fff !important;
+      font-size:12.5px !important; font-weight:600 !important; padding:4px 0 !important;
+      border-radius:8px !important; min-height:32px }
     .st-key-bnc_bnav{ position:fixed; bottom:0; left:0; right:0; z-index:1000; background:#fff;
       border-top:1px solid #e3e8f0; box-shadow:0 -1px 10px rgba(0,0,0,.08);
       padding:4px 4px calc(4px + env(safe-area-inset-bottom)) !important }
@@ -2091,20 +2097,17 @@ if nav == "E-postinnhold" and is_admin:
 # ====================================================== MOBIL: TOPP + BUNNMENY =
 # Vises bare på mobil (skjult på desktop via CSS). Sidemenyen skjules på mobil.
 with st.container(key="bnc_topbar"):
-    tb = st.columns([5, 1, 1])
+    tb = st.columns([5, 2])
     with tb[0]:
         _logo(LOGO_WHITE, 92)
-    if tb[1].button("⚙️", key="top_innst", help="Innstillinger"):
-        st.session_state["_goto"] = "Innstillinger"
-        st.rerun()
-    if tb[2].button("⎋", key="top_out", help="Logg ut"):
+    if tb[1].button("Logg ut", key="top_out", use_container_width=True):
         st.query_params.clear()
         for _k in list(st.session_state.keys()):
             st.session_state.pop(_k, None)
         st.rerun()
 
 with st.container(key="bnc_bnav"):
-    _bpages = ["Min dag", "Drop-in", "Planlegging", "Historikk"]
+    _bpages = ["Min dag", "Drop-in", "Planlegging", "Historikk", "Innstillinger"]
     if HAS_OPTION_MENU:
         _bidx = _bpages.index(nav) if nav in _bpages else 0
         _bsel = option_menu(
@@ -2112,11 +2115,11 @@ with st.container(key="bnc_bnav"):
             orientation="horizontal", default_index=_bidx, key="bnav_menu",
             styles={
                 "container": {"background-color": "#ffffff", "padding": "0!important"},
-                "nav-link": {"color": "#8892a4", "font-size": "10.5px", "font-weight": "600",
-                             "text-align": "center", "margin": "0 1px", "padding": "5px 2px",
-                             "--hover-color": "#eef2f8"},
+                "nav-link": {"color": "#8892a4", "font-size": "9px", "font-weight": "600",
+                             "text-align": "center", "margin": "0", "padding": "5px 1px",
+                             "line-height": "1.15", "--hover-color": "#eef2f8"},
                 "nav-link-selected": {"background-color": "#eef2f8", "color": "#1b2a4a"},
-                "icon": {"font-size": "18px", "display": "block", "margin": "0 0 2px 0"},
+                "icon": {"font-size": "17px", "display": "block", "margin": "0 0 2px 0"},
             })
         if _bsel != st.session_state.get("_last_bnav"):
             st.session_state["_last_bnav"] = _bsel
