@@ -203,6 +203,33 @@ st.markdown("""
   .st-key-bnc_cal button{ padding:6px 0 !important; min-height:40px; border-radius:9px !important;
     position:relative; font-size:14px !important }
   .st-key-bnc_cal .cal-wd{ text-align:center;font-size:11px;font-weight:600;color:#8892a4;padding:2px 0 }
+  /* --- Mobil: topplinje + bunnmeny (skjult på desktop) --- */
+  .st-key-bnc_topbar [data-testid="stHorizontalBlock"],
+  .st-key-bnc_bnav [data-testid="stHorizontalBlock"]{ flex-wrap:nowrap !important; gap:4px !important }
+  .st-key-bnc_topbar [data-testid="stColumn"], .st-key-bnc_topbar [data-testid="column"],
+  .st-key-bnc_bnav [data-testid="stColumn"], .st-key-bnc_bnav [data-testid="column"]{
+    min-width:0 !important; flex:1 1 0 !important; width:auto !important }
+  @media (min-width: 901px){
+    .st-key-bnc_topbar, .st-key-bnc_bnav{ display:none !important }
+  }
+  @media (max-width: 900px){
+    section[data-testid="stSidebar"]{ display:none !important }
+    [data-testid="stSidebarCollapsedControl"]{ display:none !important }
+    .block-container{ padding-top:58px !important; padding-bottom:86px !important }
+    .st-key-bnc_topbar{ position:fixed; top:0; left:0; right:0; z-index:1000; background:#1b2a4a;
+      padding:4px 10px !important; box-shadow:0 1px 6px rgba(0,0,0,.25) }
+    .st-key-bnc_topbar .bnc-topname{ color:#fff; font-family:'Archivo',sans-serif; font-weight:700;
+      font-size:17px; line-height:40px }
+    .st-key-bnc_topbar button{ background:transparent !important; border:none !important;
+      color:#fff !important; font-size:18px !important; padding:4px 0 !important }
+    .st-key-bnc_bnav{ position:fixed; bottom:0; left:0; right:0; z-index:1000; background:#fff;
+      border-top:1px solid #e3e8f0; padding:4px 4px !important; box-shadow:0 -1px 10px rgba(0,0,0,.08) }
+    .st-key-bnc_bnav button{ font-size:10.5px !important; font-weight:600 !important;
+      padding:5px 0 !important; min-height:48px; border:none !important; background:transparent !important;
+      color:#8892a4 !important; line-height:1.25 }
+    .st-key-bnc_bnav button[kind="primary"]{ color:#1b2a4a !important; background:#eef2f8 !important;
+      border-radius:10px !important }
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -2049,3 +2076,27 @@ if nav == "E-postinnhold" and is_admin:
                            "GitHub Actions for å sende nå.")
             except Exception as exc:
                 st.error(f"Kunne ikke legge i kø: {exc}")
+
+
+# ====================================================== MOBIL: TOPP + BUNNMENY =
+# Vises bare på mobil (skjult på desktop via CSS). Sidemenyen skjules på mobil.
+with st.container(key="bnc_topbar"):
+    tb = st.columns([5, 1, 1])
+    tb[0].markdown("<div class='bnc-topname'>BNC Selger</div>", unsafe_allow_html=True)
+    if tb[1].button("⚙️", key="top_innst", help="Innstillinger"):
+        st.session_state["_goto"] = "Innstillinger"
+        st.rerun()
+    if tb[2].button("⎋", key="top_out", help="Logg ut"):
+        st.query_params.clear()
+        for _k in list(st.session_state.keys()):
+            st.session_state.pop(_k, None)
+        st.rerun()
+
+with st.container(key="bnc_bnav"):
+    _bn = [("Min dag", "🗺️"), ("Drop-in", "📋"), ("Planlegging", "📅"), ("Historikk", "🕑")]
+    _bc = st.columns(len(_bn))
+    for _i, (_pg, _ic) in enumerate(_bn):
+        if _bc[_i].button(f"{_ic} {_pg}", key=f"bn_{_pg}", use_container_width=True,
+                          type=("primary" if nav == _pg else "secondary")):
+            st.session_state["_goto"] = _pg
+            st.rerun()
