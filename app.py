@@ -715,12 +715,10 @@ def plan_poly(points, cands, hours, visit_min, speed, detour, target_n,
         ordered = [(p, "Utreise") for p in out] + [(p, "Retur") for p in ret]
     else:
         ordered = [(p, "") for p in picks]
-    budget = hours * 60 - base_drive          # tid igjen til besøk + omveier
+    # Antall besøk styrer (target_n) – ikke en timegrense. Kim tar de han rekker på veien.
     route, extra_min, extra_km = [], 0.0, 0.0
     for (t, perp, c), retning in ordered:
         emin = routing.travel_minutes(2 * perp, speed, 1.3)   # omvei tur/retur
-        if route and extra_min + visit_min + emin > max(budget, 0):
-            continue
         extra_min += visit_min + emin
         extra_km += 2 * perp
         route.append({**c, "detour_km": round(perp, 1), "extra_min": round(emin),
@@ -1241,7 +1239,16 @@ if nav == "Min dag":
                     f"<div class='v'>{day_co2} <small>kg CO₂e</small></div></div>", unsafe_allow_html=True)
         st.write("")
 
-        show_map = st.checkbox("Vis kart", value=True)
+        mc1, mc2 = st.columns([3, 1])
+        show_map = mc1.checkbox("Vis kart", value=True)
+        if mc2.button("🗑️ Slett dagen", key="mindag_del", use_container_width=True,
+                      help="Slett hele den planlagte ruta for denne dagen"):
+            try:
+                delete_plan(email, seldate.isoformat())
+                st.session_state["_toast"] = "Dagens rute slettet."
+                st.rerun()
+            except Exception as exc:
+                st.error(f"{exc}")
         list_col, map_col = st.columns([5, 6]) if show_map else (st.container(), None)
         with list_col:
             g_url = gmaps_route_url(start, route, dest=meta.get("dest")) if start else None
@@ -1522,11 +1529,11 @@ if nav == "Planlegging":
         st.markdown("#### Besøksvalg")
         v1, v2 = st.columns(2)
         ss["w_antall"] = v1.number_input("Besøk per dag", 1, 20, int(ss["w_antall"]), 1,
-                                         key="_w_antall")
-        ss["w_hours"] = v2.number_input("Timer per dag", 1.0, 12.0, float(ss["w_hours"]), 0.5,
-                                        key="_w_hours")
-        ss["w_visit"] = st.number_input("Minutter per besøk", 10, 180, int(ss["w_visit"]), 5,
-                                        key="_w_visit")
+                                         key="_w_antall",
+                                         help="Så mange forslag spres langs ruta. Kim tar de "
+                                              "han rekker på veien.")
+        ss["w_visit"] = v2.number_input("Minutter per besøk", 10, 180, int(ss["w_visit"]), 5,
+                                        key="_w_visit", help="Kun for anslått kjøretid.")
 
         if ss["w_all"]:
             bsum = "Alle bransjer"
@@ -1604,7 +1611,17 @@ if nav == "Planlegging":
                 if ss["pl_step"] == 1 else [])
     if ss["pl_step"] == 1:
         st.divider()
-        st.markdown("#### Kommende ruter")
+        kh1, kh2 = st.columns([3, 1])
+        kh1.markdown("#### Kommende ruter")
+        if upcoming and kh2.button("🗑️ Tøm alle", key="del_all_plans", use_container_width=True,
+                                   help="Slett alle kommende planlagte ruter"):
+            try:
+                sb_delete("planned_routes", {"user_email": f"eq.{email}",
+                                             "plan_date": f"gte.{today.isoformat()}"})
+                st.session_state["_toast"] = "Alle kommende ruter slettet."
+                st.rerun()
+            except Exception as exc:
+                st.error(f"{exc}")
         if not upcoming:
             st.caption("Ingen kommende ruter ennå – planlegg en rute over.")
         if len(upcoming) > 1:
