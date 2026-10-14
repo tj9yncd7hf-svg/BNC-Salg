@@ -1282,11 +1282,24 @@ if nav == "Min dag":
                         except Exception as exc:
                             st.error(f"{exc}")
                 else:
-                    b1, b2, b3 = st.columns([2, 2, 1])
+                    b1, b2, b3, b4 = st.columns([3, 3, 1, 1])
                     if b1.button("📝  Registrer", key=f"reg_{org}", use_container_width=True):
                         register_dialog(s)
                     b2.link_button("🧭  Naviger", gmaps_dest_url(s), use_container_width=True)
-                    if b3.button("✕", key=f"exc_{org}", help="Ikke aktuell – skjul fra forslag",
+                    if b3.button("✕", key=f"rm_{org}",
+                                 help="Fjern fra ruta (kan dukke opp igjen senere)",
+                                 use_container_width=True):
+                        try:
+                            rest = [x for x in route if str(x.get("orgnr")) != org]
+                            for i, x in enumerate(rest):
+                                x["stop"] = i + 1
+                            _save_recompute(email, seldate, start, rest, meta)
+                            st.session_state["_toast"] = f"{s.get('navn','')} fjernet fra ruta."
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"{exc}")
+                    if b4.button("🚫", key=f"exc_{org}",
+                                 help="Ikke aktuell – skjul permanent fra framtidige forslag",
                                  use_container_width=True):
                         try:
                             exclude_company(email, s)
@@ -1294,7 +1307,7 @@ if nav == "Min dag":
                             for i, x in enumerate(rest):
                                 x["stop"] = i + 1
                             _save_recompute(email, seldate, start, rest, meta)
-                            st.session_state["_toast"] = f"{s.get('navn','')} skjult fra forslag."
+                            st.session_state["_toast"] = f"{s.get('navn','')} skjult permanent."
                             st.rerun()
                         except Exception as exc:
                             st.error(f"{exc}")
@@ -1658,10 +1671,11 @@ if nav == "Planlegging":
             if g_url:
                 st.link_button("🧭  Åpne ruta i Google Maps", g_url, use_container_width=True)
             if comps:
-                st.caption("Forslag til drop-in (valgfritt) — 🔄 bytt ut · ✕ fjern:")
+                st.caption("Forslag til drop-in (valgfritt) — 🔄 bytt ut · ✕ fjern fra ruta "
+                           "· 🚫 skjul permanent:")
             for s in comps:
                 org = str(s.get("orgnr"))
-                rc = st.columns([6, 1, 1])
+                rc = st.columns([5, 1, 1, 1])
                 rt = s.get("retning")
                 badge = (f"<span class='bnc-badge'>{rt}</span> " if rt else "")
                 dkm = s.get("detour_km")
@@ -1689,7 +1703,20 @@ if nav == "Planlegging":
                     except Exception as exc:
                         st.error(f"{exc}")
                 if rc[2].button("✕", key=f"plx_{d}_{org}",
-                                help="Ikke aktuell – skjul fra forslag og fjern",
+                                help="Fjern fra denne ruta (kan dukke opp igjen senere)",
+                                use_container_width=True):
+                    try:
+                        rest = [x for x in comps if str(x.get("orgnr")) != org]
+                        for i, x in enumerate(rest):
+                            x["stop"] = i + 1
+                        if dt is not None:
+                            _save_recompute(email, dt, pstart, rest, pmeta)
+                        st.session_state["_toast"] = f"{s.get('navn','')} fjernet fra ruta."
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"{exc}")
+                if rc[3].button("🚫", key=f"plb_{d}_{org}",
+                                help="Ikke aktuell – skjul permanent fra alle framtidige forslag",
                                 use_container_width=True):
                     try:
                         exclude_company(email, s)
@@ -1698,7 +1725,7 @@ if nav == "Planlegging":
                             x["stop"] = i + 1
                         if dt is not None:
                             _save_recompute(email, dt, pstart, rest, pmeta)
-                        st.session_state["_toast"] = f"{s.get('navn','')} skjult fra forslag."
+                        st.session_state["_toast"] = f"{s.get('navn','')} skjult permanent."
                         st.rerun()
                     except Exception as exc:
                         st.error(f"{exc}")
