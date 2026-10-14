@@ -1,0 +1,34 @@
+# Render-oppsett for BNC Selger (Streamlit).
+# Koble repoet til Render → «New + → Blueprint» → velg repoet. Render leser denne fila.
+# Hemmeligheter (sync:false) settes manuelt i Render-dashbordet, ikke i repoet.
+services:
+  - type: web
+    name: bnc-selger
+    runtime: python
+    plan: free            # endre til "starter" (~$7/mnd) for å slippe cold start
+    region: frankfurt     # nærmest Norge
+    branch: main
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: >-
+      streamlit run app.py
+      --server.port $PORT
+      --server.address 0.0.0.0
+      --server.headless true
+      --server.enableCORS false
+      --server.enableXsrfProtection false
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: BACKOFFICE_EMAIL
+        sync: false
