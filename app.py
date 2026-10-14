@@ -106,10 +106,14 @@ DEFAULT_CONTENT = {
 
 
 def co2_factor(settings):
+    # NB: bruk eksplisitt None-sjekk – 0 (helelektrisk, f.eks. BMW iX1) er en gyldig verdi.
+    v = settings.get("co2_g_per_km")
+    if v is None or v == "":
+        return 0.0
     try:
-        return float(settings.get("co2_g_per_km") or 13)
+        return float(v)
     except Exception:
-        return 13.0
+        return 0.0
 
 
 def co2_kg(km, settings):
@@ -1813,13 +1817,19 @@ if nav == "Innstillinger":
                                             value=_settings.get("start_label", ""),
                                             placeholder="Valgfritt – kan overstyres på «Min dag»")
                 cc1, cc2 = st.columns(2)
-                hours = cc1.number_input("Timer pr. dag", 1.0, 12.0, float(_settings.get("hours_per_day") or 7), 0.5)
-                visit_min = cc2.number_input("Snitt pr. besøk (min)", 10, 180, int(_settings.get("avg_visit_minutes") or 60), 5)
-                cc3, cc4 = st.columns(2)
-                speed = cc3.number_input("Snittfart bil (km/t)", 30, 110, int(_settings.get("speed_kmh") or 70), 5)
-                co2 = cc4.number_input("Utslipp (g CO₂e/km)", 0, 400, int(_settings.get("co2_g_per_km") or 13), 1,
-                                       help="For konsernrapportering. Typiske anslag: elbil ~13, "
-                                            "ladbar hybrid ~60, bensin ~165, diesel ~170.")
+                visit_min = cc1.number_input("Snitt pr. besøk (min)", 10, 180,
+                                             int(_settings.get("avg_visit_minutes") or 60), 5,
+                                             help="Standardverdi i planleggingen og for "
+                                                  "«Beregnet tid»-anslaget.")
+                speed = cc2.number_input("Snittfart bil (km/t)", 30, 110,
+                                         int(_settings.get("speed_kmh") or 70), 5,
+                                         help="Brukes til å anslå kjøretid.")
+                _co2d = _settings.get("co2_g_per_km")
+                co2 = st.number_input("Utslipp (g CO₂e/km)", 0, 400,
+                                      int(_co2d) if _co2d not in (None, "") else 0, 1,
+                                      help="For konsernrapportering. Helelektrisk (f.eks. BMW iX1) "
+                                           "= 0. Ladbar hybrid ~60, bensin ~165, diesel ~170.")
+                hours = float(_settings.get("hours_per_day") or 8)
         lagre = st.form_submit_button("💾  Lagre innstillinger", type="primary")
     if lagre:
         lat, lon, label = (_settings.get("start_lat"), _settings.get("start_lon"), start_label)
