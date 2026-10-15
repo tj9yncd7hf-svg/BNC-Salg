@@ -462,11 +462,23 @@ def unexclude(email, orgnr):
     sb_delete("excluded", {"user_email": f"eq.{email}", "orgnr": f"eq.{orgnr}"})
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def planned_rows(email):
+    """Alle planlagte ruter for en bruker – mellomlagret, så måned/dato-klikk ikke henter
+    fra databasen hver gang. Tømmes ved lagring/sletting."""
+    try:
+        return sb_get("planned_routes", "plan_date,companies,start,meta",
+                      {"user_email": f"eq.{email}", "order": "plan_date.asc"})
+    except Exception:
+        return []
+
+
 def save_plan(email, d, start, companies, meta):
     sb_upsert("planned_routes", {
         "user_email": email, "plan_date": d.isoformat(),
         "start": start, "companies": companies, "meta": meta,
         "created_at": datetime.now(timezone.utc).isoformat()}, "user_email,plan_date")
+    planned_rows.clear()
 
 
 def get_plan(email, d):
@@ -489,6 +501,7 @@ def list_plans(email):
 
 def delete_plan(email, d):
     sb_delete("planned_routes", {"user_email": f"eq.{email}", "plan_date": f"eq.{d}"})
+    planned_rows.clear()
 
 
 def load_settings(email):
@@ -792,13 +805,19 @@ def _plan_pool(valgte, orgvalg, skip_dates):
             and (off is None or c.get("orgform") == off)]
 
 
+def save_plans(plans):
+    for p in plans:
+        save_plan(email, p["date"], p["start"], p["companies"], p["meta"])
+
+
 def plan_area(days, start_txt, hours, visit_min, valgte, orgvalg, maxkm, n_visits):
-    """Uten destinasjon: foreslå drop-in rundt startstedet, én plan pr. dag (dedup)."""
+    """Uten destinasjon: foreslå drop-in rundt startstedet, én plan pr. dag (dedup).
+    BEREGNER uten å lagre – returnerer (status, melding, planer)."""
     slat, slon, slabel = geocode(start_txt) if start_txt else (None, None, start_txt)
     if not slat:
-        return ("feil", "Fant ikke startadressen. Prøv «gate nr, sted» eller et stedsnavn.")
+        return ("feil", "Fant ikke startadressen. Prøv «gate nr, sted» eller et stedsnavn.", [])
     pool = _plan_pool(valgte, orgvalg, days)
-    used, made, tv = set(), 0, 0
+    used, plans = set(), []
     for day in days:
         cands = [c for c in pool if str(c.get("orgnr")) not in used]
         res = routing.plan_route(slat, slon, cands, hours,
@@ -809,15 +828,16 @@ def plan_area(days, start_txt, hours, visit_min, valgte, orgvalg, maxkm, n_visit
         for s in route:
             used.add(str(s.get("orgnr")))
         if route:
-            save_plan(email, day, {"lat": slat, "lon": slon, "label": slabel}, route, {
-                "total_min": res["total_min"], "total_km": res["total_km"],
-                "n_candidates": res["n_candidates"], "route_pts": [[slat, slon]],
-                "filter": {"kat": valgte, "org": orgvalg, "detour": None}})
-            made += 1
-            tv += len(route)
-    if made == 0:
-        return ("tom", "Fant ingen bedrifter med disse valgene. Prøv flere bransjer.")
-    return ("ok", f"{made} dag(er) planlagt med til sammen {tv} drop-in-forslag.")
+            plans.append({"plan_date": day.isoformat(), "date": day,
+                          "start": {"lat": slat, "lon": slon, "label": slabel},
+                          "companies": route,
+                          "meta": {"total_min": res["total_min"], "total_km": res["total_km"],
+                                   "n_candidates": res["n_candidates"], "route_pts": [[slat, slon]],
+                                   "filter": {"kat": valgte, "org": orgvalg, "detour": None}}})
+    if not plans:
+        return ("tom", "Fant ingen bedrifter med disse valgene. Prøv flere bransjer.", [])
+    tv = sum(len(p["companies"]) for p in plans)
+    return ("ok", f"{len(plans)} dag(er) med til sammen {tv} drop-in-forslag.", plans)
 
 
 def plan_legs(legs, hours, visit_min, valgte, orgvalg, detour, n_visits):
@@ -827,7 +847,7 @@ def plan_legs(legs, hours, visit_min, valgte, orgvalg, detour, n_visits):
     dates = [lg["date"] for lg in legs]
     pool = _plan_pool(valgte, orgvalg, dates)
     speed = float(_settings.get("speed_kmh") or 70)
-    used, made, tv = set(), 0, 0
+    used, plans = set(), []
     for lg in legs:
         pts, labels = [], []
         for pl in lg.get("places", []):
@@ -835,11 +855,11 @@ def plan_legs(legs, hours, visit_min, valgte, orgvalg, detour, n_visits):
                 continue
             la, lo, lb = geocode(pl)
             if not la:
-                return ("feil", f"Fant ikke «{pl}». Prøv «gate nr, sted» eller et stedsnavn.")
+                return ("feil", f"Fant ikke «{pl}». Prøv «gate nr, sted» eller et stedsnavn.", [])
             pts.append((la, lo))
             labels.append(lb or pl)
         if len(pts) < 2:
-            return ("feil", "Hver etappe trenger både et startsted og et sluttsted.")
+            return ("feil", "Hver etappe trenger både et startsted og et sluttsted.", [])
         retur = bool(lg.get("retur"))
         if retur:
             drive = pts + [pts[0]]
@@ -853,16 +873,17 @@ def plan_legs(legs, hours, visit_min, valgte, orgvalg, detour, n_visits):
         route = res["route"]
         for s in route:
             used.add(str(s.get("orgnr")))
-        save_plan(email, lg["date"], {"lat": pts[0][0], "lon": pts[0][1], "label": labels[0]},
-                  route, {"total_min": res["total_min"], "total_km": res["total_km"],
-                          "n_candidates": res["n_candidates"], "dest": dest,
-                          "route_pts": res["route_pts"], "way": labels, "retur": retur,
-                          "filter": {"kat": valgte, "org": orgvalg, "detour": detour}})
-        made += 1
-        tv += len(route)
-    if made == 0:
-        return ("tom", "Ingen etapper å planlegge.")
-    return ("ok", f"{made} etappe(r) planlagt med til sammen {tv} drop-in-forslag langs ruta.")
+        plans.append({"plan_date": lg["date"].isoformat(), "date": lg["date"],
+                      "start": {"lat": pts[0][0], "lon": pts[0][1], "label": labels[0]},
+                      "companies": route,
+                      "meta": {"total_min": res["total_min"], "total_km": res["total_km"],
+                               "n_candidates": res["n_candidates"], "dest": dest,
+                               "route_pts": res["route_pts"], "way": labels, "retur": retur,
+                               "filter": {"kat": valgte, "org": orgvalg, "detour": detour}}})
+    if not plans:
+        return ("tom", "Ingen etapper å planlegge.", [])
+    tv = sum(len(p["companies"]) for p in plans)
+    return ("ok", f"{len(plans)} etappe(r) med til sammen {tv} drop-in-forslag langs ruta.", plans)
 
 
 def alt_company(meta, current_comps, orgnr):
@@ -988,6 +1009,7 @@ def register_dialog(company):
                     "payload": {"navn": company.get("navn", ""), "selger": email}})
             if no_more:
                 exclude_company(email, company)
+            user_co2_totals.clear()
             _m = "Besøk registrert – rapport sendt."
             st.session_state["_toast"] = _m + (" Kunden skjules fra framtidige forslag."
                                                if no_more else " Bedriften er merket besøkt.")
@@ -1088,6 +1110,72 @@ setTimeout(function(){map.invalidateSize();fit();},800);
                 .replace("__H__", str(height)))
     import streamlit.components.v1 as components
     components.html(html, height=height + 4)
+
+
+DAY_HEX = ["#1b2a4a", "#c0392b", "#1f9d5b", "#e67e22", "#8e44ad",
+           "#2980b9", "#16a085", "#d4ac0d"]
+
+
+def leaflet_multi_html(plans, height=420):
+    """Samlet flerdagerskart (Leaflet) – én farge per dag, nummererte stopp + forklaring."""
+    paths, pts, legend = [], [], []
+    for di, p in enumerate(plans):
+        comps = p.get("companies") or []
+        meta = p.get("meta") or {}
+        col = DAY_HEX[di % len(DAY_HEX)]
+        rpts = meta.get("route_pts")
+        if rpts and len(rpts) >= 2:
+            paths.append({"line": [[a, b] for a, b in rpts], "color": col})
+        try:
+            dt = datetime.fromisoformat(p["plan_date"]).date()
+            dag = f"{UKEDAGER[dt.weekday()].capitalize()} {dt.strftime('%d.%m')}"
+        except Exception:
+            dag = p.get("plan_date", "")
+        if comps:
+            legend.append((col, dag))
+        for s in comps:
+            if s.get("lat") is None:
+                continue
+            pts.append({"lat": s["lat"], "lon": s["lon"], "label": str(s.get("stop", "")),
+                        "navn": s.get("navn", ""), "dag": dag, "color": col})
+    if not pts and not paths:
+        st.caption("Ingen punkter å vise på kart.")
+        return
+    tmpl = """<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>html,body{margin:0}#map{height:__H__px;width:100%}</style></head>
+<body><div id="map"></div><script>
+var paths=__PATHS__, pts=__PTS__;
+var map=L.map('map',{scrollWheelZoom:false});
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+ {maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+var all=[];
+paths.forEach(function(pa){ L.polyline(pa.line,{color:pa.color,weight:4,opacity:.85}).addTo(map);
+ pa.line.forEach(function(x){all.push(x);}); });
+function ic(l,c){return L.divIcon({className:'',iconSize:[22,22],iconAnchor:[11,11],
+ html:'<div style="background:'+c+';color:#fff;width:22px;height:22px;border-radius:50%;'
+ +'display:flex;align-items:center;justify-content:center;font:700 11px sans-serif;'
+ +'border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.4)">'+l+'</div>'});}
+pts.forEach(function(p){ L.marker([p.lat,p.lon],{icon:ic(p.label,p.color)}).addTo(map)
+ .bindTooltip(p.dag+' · '+p.label+'. '+p.navn); all.push([p.lat,p.lon]); });
+var b=L.latLngBounds(all);
+function fit(){ if(all.length>1){map.fitBounds(b,{padding:[25,25]});} else if(all.length){map.setView(all[0],11);} }
+fit();
+setTimeout(function(){map.invalidateSize();fit();},300);
+setTimeout(function(){map.invalidateSize();fit();},800);
+</script></body></html>"""
+    html = (tmpl.replace("__PATHS__", json.dumps(paths))
+                .replace("__PTS__", json.dumps(pts))
+                .replace("__H__", str(height)))
+    import streamlit.components.v1 as components
+    components.html(html, height=height + 4)
+    chips = "".join(
+        f"<span style='display:inline-block;margin:2px 10px 2px 0'>"
+        f"<span style='display:inline-block;width:11px;height:11px;border-radius:3px;"
+        f"background:{c};margin-right:5px'></span>{d}</span>" for c, d in legend)
+    if chips:
+        st.markdown(f"<div style='font-size:13px'>{chips}</div>", unsafe_allow_html=True)
 
 
 DAY_COLORS = [[27, 42, 74], [192, 57, 43], [31, 157, 91], [230, 126, 34],
@@ -1254,7 +1342,8 @@ def calendar_daystyle(cy, cm, w_from, w_to, planned, today):
 # ============================================================== MIN DAG =======
 if nav == "Min dag":
     today = date.today()
-    _plans = list_plans(email)            # kommende planlagte dager (>= i dag)
+    _plans = [p for p in planned_rows(email)      # kommende planlagte dager (>= i dag)
+              if p["plan_date"] >= today.isoformat()]
     byd = {p["plan_date"]: p for p in _plans}
     opts = sorted(set(byd.keys()) | {today.isoformat()})
     default_iso = today.isoformat() if today.isoformat() in opts else opts[0]
@@ -1370,8 +1459,8 @@ if nav == "Min dag":
                             st.error(f"{exc}")
         if show_map and map_col is not None and start:
             with map_col:
-                route_map(start, route, dest=meta.get("dest"),
-                          route_pts=meta.get("route_pts"))
+                leaflet_route_html(start, route, dest=meta.get("dest"),
+                                   route_pts=meta.get("route_pts"))
 
 
 # =============================================================== DROP-IN ======
@@ -1424,21 +1513,67 @@ if nav == "Planlegging":
     ss.setdefault("w_retur", False)
     ss.setdefault("w_antall", 6)
     ss.setdefault("w_org", "AS + ENK")
-    ss.setdefault("w_all", True)
+    ss.setdefault("w_all", False)
     ss.setdefault("w_cat", [])
     ss.setdefault("w_hours", float(_settings.get("hours_per_day") or 7))
     ss.setdefault("w_visit", int(_settings.get("avg_visit_minutes") or 60))
     ss.setdefault("w_max", 120)
     ss.setdefault("w_det", 15)
+    ss.setdefault("pl_review", False)
+    ss.setdefault("pl_preview", [])
     if ss["pl_step"] > 1 and ss["w_from"] is None:
         ss["pl_step"] = 1
 
-    try:
-        allplans = sb_get("planned_routes", "plan_date,companies,start,meta",
-                          {"user_email": f"eq.{email}", "order": "plan_date.asc"})
-    except Exception:
-        allplans = []
+    allplans = planned_rows(email)
     planned_set = {p["plan_date"] for p in allplans if (p.get("companies") or [])}
+
+    # --- Godkjenning: vis ruteforslag før det legges i Min dag --------------
+    if ss.get("pl_review") and ss.get("pl_preview"):
+        plans = ss["pl_preview"]
+        tot_km = sum(float(p["meta"].get("total_km") or 0) for p in plans)
+        tot_n = sum(len(p["companies"]) for p in plans)
+        st.markdown("#### Forslag til rute – godkjenn for å legge i Min dag")
+        st.caption(f"{len(plans)} dag(er) · {tot_n} forslag · ca. {tot_km:.0f} km totalt. "
+                   "Ingenting lagres før du trykker «Godkjenn».")
+        if len(plans) > 1:
+            leaflet_multi_html(plans)
+        for pi, p in enumerate(plans):
+            d = date.fromisoformat(p["plan_date"])
+            meta = p["meta"]
+            with st.expander(f"{UKEDAGER[d.weekday()].capitalize()} {d.strftime('%d.%m.%Y')}"
+                             f"  ·  {len(p['companies'])} forslag  ·  "
+                             f"{float(meta.get('total_km') or 0):.0f} km", expanded=(len(plans) == 1)):
+                if len(plans) == 1:
+                    leaflet_route_html(p["start"], p["companies"], dest=meta.get("dest"),
+                                       route_pts=meta.get("route_pts"))
+                for i, c in enumerate(p["companies"], 1):
+                    bits = [f"**{i}. {c.get('navn', '')}**"]
+                    sub = []
+                    if c.get("poststed"):
+                        sub.append(c["poststed"])
+                    if c.get("kategori"):
+                        sub.append(c["kategori"])
+                    if c.get("detour_km") is not None:
+                        sub.append(f"omvei {c['detour_km']:.0f} km (+{c.get('extra_min', 0):.0f} min)")
+                    if c.get("retning"):
+                        sub.append(c["retning"])
+                    st.markdown(bits[0] + (("  \n" + " · ".join(sub)) if sub else ""))
+        st.divider()
+        c_ok, c_no = st.columns([2, 1])
+        if c_ok.button("Godkjenn og legg i Min dag", type="primary",
+                       use_container_width=True):
+            save_plans(plans)
+            n = len(plans)
+            ss["pl_preview"] = []
+            ss["pl_review"] = False
+            ss["pl_step"] = 1
+            st.session_state["_toast"] = f"{n} dag(er) lagt i Min dag."
+            st.rerun()
+        if c_no.button("Forkast", use_container_width=True):
+            ss["pl_preview"] = []
+            ss["pl_review"] = False
+            st.rerun()
+        st.stop()
 
     wizard_indicator(ss["pl_step"])
 
@@ -1634,14 +1769,14 @@ if nav == "Planlegging":
                         vias = [v.strip() for v in ss["w_vias"] if v and v.strip()]
                         if (ss["w_til"] or "").strip():
                             places = [ss["w_start"]] + vias + [ss["w_til"]]
-                            status, msg = plan_legs(
+                            status, msg, plans = plan_legs(
                                 [{"date": days[0], "places": places, "retur": ss["w_retur"]}],
                                 ss["w_hours"], ss["w_visit"], valgte, ss["w_org"], ss["w_det"],
                                 int(ss["w_antall"]))
                         else:
-                            status, msg = plan_area(days, ss["w_start"], ss["w_hours"],
-                                                    ss["w_visit"], valgte, ss["w_org"],
-                                                    ss["w_max"], int(ss["w_antall"]))
+                            status, msg, plans = plan_area(days, ss["w_start"], ss["w_hours"],
+                                                           ss["w_visit"], valgte, ss["w_org"],
+                                                           ss["w_max"], int(ss["w_antall"]))
                     else:
                         legs, prev = [], (ss["w_start"] or "").strip()
                         for i, dy in enumerate(days):
@@ -1650,15 +1785,16 @@ if nav == "Planlegging":
                                 legs.append({"date": dy, "places": [prev, dest], "retur": False})
                                 prev = dest
                         if legs:
-                            status, msg = plan_legs(legs, ss["w_hours"], ss["w_visit"], valgte,
-                                                    ss["w_org"], ss["w_det"], int(ss["w_antall"]))
+                            status, msg, plans = plan_legs(legs, ss["w_hours"], ss["w_visit"],
+                                                           valgte, ss["w_org"], ss["w_det"],
+                                                           int(ss["w_antall"]))
                         else:
-                            status, msg = plan_area(days, ss["w_start"], ss["w_hours"],
-                                                    ss["w_visit"], valgte, ss["w_org"],
-                                                    ss["w_max"], int(ss["w_antall"]))
+                            status, msg, plans = plan_area(days, ss["w_start"], ss["w_hours"],
+                                                           ss["w_visit"], valgte, ss["w_org"],
+                                                           ss["w_max"], int(ss["w_antall"]))
                 if status == "ok":
-                    ss["pl_step"] = 1
-                    st.session_state["_toast"] = f"{msg}"
+                    ss["pl_preview"] = plans
+                    ss["pl_review"] = True
                     st.rerun()
                 elif status == "tom":
                     st.warning(msg)
@@ -1676,6 +1812,7 @@ if nav == "Planlegging":
             try:
                 sb_delete("planned_routes", {"user_email": f"eq.{email}",
                                              "plan_date": f"gte.{today.isoformat()}"})
+                planned_rows.clear()
                 st.session_state["_toast"] = "Alle kommende ruter slettet."
                 st.rerun()
             except Exception as exc:
@@ -1688,7 +1825,7 @@ if nav == "Planlegging":
             n_all = sum(len(p.get("companies") or []) for p in upcoming)
             st.markdown(f"**Hele turen** — {len(upcoming)} dager · {n_all} forslag · "
                         f"≈ {tot_km_all} km")
-            multi_route_map(upcoming)
+            leaflet_multi_html(upcoming)
             st.write("")
     for p in upcoming:
         d = p["plan_date"]
