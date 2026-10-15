@@ -26,7 +26,10 @@ except Exception:
     HAS_OPTION_MENU = False
 
 APP_DIR = Path(__file__).parent
-DATA_FILE = APP_DIR / "data" / "companies.json"
+DATA_FILES = {"NO": APP_DIR / "data" / "companies.json",
+              "SE": APP_DIR / "data" / "companies_se.json"}
+DATA_FILE = DATA_FILES["NO"]  # bakoverkompatibilitet
+LAND_NAVN = {"NO": "Norge", "SE": "Sverige"}
 LOGO_WHITE = APP_DIR / "assets" / "bnc_logo_white.webp"
 LOGO_NAVY = APP_DIR / "assets" / "bnc_logo_navy.webp"
 
@@ -289,21 +292,41 @@ def sb_delete(table, params):
 
 # ------------------------------------------------------------------- data -----
 @st.cache_data(show_spinner=False)
-def load_companies():
-    if not DATA_FILE.exists():
+def load_companies(land="NO"):
+    f = DATA_FILES.get(land, DATA_FILES["NO"])
+    if not f.exists():
         return []
-    with open(DATA_FILE, encoding="utf-8") as f:
-        data = json.load(f)
+    with open(f, encoding="utf-8") as fh:
+        data = json.load(fh)
     return [c for c in data if c.get("lat") is not None and c.get("lon") is not None]
 
 
-def geocode(text):
+def current_land():
+    return st.session_state.get("land", "NO")
+
+
+def geocode(text, land=None):
     """Startpunkt: 1) adresse, 2) stedsnavn, 3) POI (Nominatim). Dekker «gate nr,
-    sted», «Molde lufthavn» og dagligtale som «molde flyplass»."""
+    sted», «Molde lufthavn» og dagligtale som «molde flyplass».
+    For Sverige (land=SE) brukes Nominatim mot svenske adresser/steder."""
     t = (text or "").strip()
     if not t:
         return None, None, text
-    try:
+    if land is None:
+        land = current_land()
+    if land == "SE":
+        try:
+            r = requests.get("https://nominatim.openstreetmap.org/search",
+                             params={"q": t, "format": "json", "limit": 1, "countrycodes": "se"},
+                             headers={"User-Agent": "BNC-Selger/1.0 (post@bncnordic.no)"},
+                             timeout=15)
+            js = r.json()
+            if js:
+                return float(js[0]["lat"]), float(js[0]["lon"]), js[0].get("display_name", t).split(",")[0] or t
+        except Exception:
+            pass
+        return None, None, text
+    def _adr():
         r = requests.get("https://ws.geonorge.no/adresser/v1/sok",
                          params={"sok": t, "treffPerSide": 1, "utkoordsys": 4258}, timeout=15)
         adr = (r.json().get("adresser") or [])
@@ -311,9 +334,9 @@ def geocode(text):
             rp = adr[0].get("representasjonspunkt") or {}
             if rp.get("lat"):
                 return float(rp["lat"]), float(rp["lon"]), adr[0].get("adressetekst", t)
-    except Exception:
-        pass
-    try:
+        return None
+
+    def _sted():
         r = requests.get("https://api.kartverket.no/stedsnavn/v1/navn",
                          params={"sok": t, "utkoordsys": 4258, "treffPerSide": 1}, timeout=15)
         navn = (r.json().get("navn") or [])
@@ -321,17 +344,29 @@ def geocode(text):
             rp = navn[0].get("representasjonspunkt") or {}
             if rp.get("nord"):
                 return float(rp["nord"]), float(rp["øst"]), navn[0].get("skrivemåte", t)
-    except Exception:
-        pass
-    try:
+        return None
+
+    def _nom():
         r = requests.get("https://nominatim.openstreetmap.org/search",
                          params={"q": t, "format": "json", "limit": 1, "countrycodes": "no"},
                          headers={"User-Agent": "BNC-Selger/1.0 (post@bncnordic.no)"}, timeout=15)
         js = r.json()
         if js:
             return float(js[0]["lat"]), float(js[0]["lon"]), t
-    except Exception:
-        pass
+        return None
+
+    # Har teksten et husnummer? Da er det en adresse → adressesøk først.
+    # Ellers er det et stedsnavn (f.eks. «Bergen») → stedsnavnsøk først,
+    # slik at bynavn ikke treffer en tilfeldig gateadresse med samme navn.
+    order = ([_adr, _sted, _nom] if any(ch.isdigit() for ch in t)
+             else [_sted, _adr, _nom])
+    for fn in order:
+        try:
+            res = fn()
+            if res:
+                return res
+        except Exception:
+            pass
     return None, None, text
 
 
@@ -600,7 +635,7 @@ if LOGIN_TOKEN and _qp.get("t") != LOGIN_TOKEN:
 
 _settings = load_settings(email)
 is_admin = email in ADMIN_EMAILS
-companies = load_companies()
+companies = load_companies(current_land())
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -671,7 +706,10 @@ if _goto in pages and nav != _goto:
     nav = _goto
 
 if not companies:
-    st.warning("Bedriftslista (data/companies.json) mangler eller er tom.")
+    _lf = DATA_FILES.get(current_land())
+    st.warning(f"Bedriftslista for {LAND_NAVN.get(current_land(), current_land())} "
+               f"({_lf.name if _lf else '?'}) mangler eller er tom. "
+               "Bytt søkeområde under Innstillinger.")
     st.stop()
 
 
@@ -840,10 +878,12 @@ def plan_area(days, start_txt, hours, visit_min, valgte, orgvalg, maxkm, n_visit
     return ("ok", f"{len(plans)} dag(er) med til sammen {tv} drop-in-forslag.", plans)
 
 
-def plan_legs(legs, hours, visit_min, valgte, orgvalg, detour, n_visits):
+def plan_legs(legs, hours, visit_min, valgte, orgvalg, detour, n_visits, area_km=60):
     """Planlegg én eller flere etapper. Hver etappe = {date, places:[tekst,…], retur:bool}.
     places er den FASTE kjøreruta (start → mellomstopp → mål). Ved retur legges hjemveien
-    til og forslagene spres langs korridoren (merket Utreise/Retur). Ingen duplikater."""
+    til og forslagene spres langs korridoren (merket Utreise/Retur).
+    Når start og mål er samme sted (Kim blir værende i byen) søkes det i stedet drop-in
+    rundt byen. Ingen duplikater på tvers av dagene."""
     dates = [lg["date"] for lg in legs]
     pool = _plan_pool(valgte, orgvalg, dates)
     speed = float(_settings.get("speed_kmh") or 70)
@@ -860,6 +900,31 @@ def plan_legs(legs, hours, visit_min, valgte, orgvalg, detour, n_visits):
             labels.append(lb or pl)
         if len(pts) < 2:
             return ("feil", "Hver etappe trenger både et startsted og et sluttsted.", [])
+
+        # Blir Kim værende på samme sted (start ≈ mål)? Da: drop-in rundt byen.
+        stay = routing.haversine_km(pts[0][0], pts[0][1], pts[-1][0], pts[-1][1]) < 3
+        if stay:
+            center = pts[-1]
+            clabel = labels[-1]
+            cands = [c for c in pool if str(c.get("orgnr")) not in used]
+            res = routing.plan_route(center[0], center[1], cands, hours,
+                                     visit_minutes=visit_min, max_leg_km=area_km)
+            route = res["route"]
+            if n_visits:
+                route = route[:int(n_visits)]
+            for s in route:
+                used.add(str(s.get("orgnr")))
+            plans.append({"plan_date": lg["date"].isoformat(), "date": lg["date"],
+                          "start": {"lat": center[0], "lon": center[1], "label": clabel},
+                          "companies": route,
+                          "meta": {"total_min": res["total_min"], "total_km": res["total_km"],
+                                   "n_candidates": res["n_candidates"],
+                                   "dest": {"lat": center[0], "lon": center[1], "label": clabel},
+                                   "route_pts": [[center[0], center[1]]], "way": [clabel],
+                                   "retur": False, "base": clabel,
+                                   "filter": {"kat": valgte, "org": orgvalg, "detour": None}}})
+            continue
+
         retur = bool(lg.get("retur"))
         if retur:
             drive = pts + [pts[0]]
@@ -936,6 +1001,25 @@ def _save_recompute(user, d, start, comps, meta):
     meta["total_km"] = round(base_km + extra_km, 1)
     meta["total_min"] = round(base_drive + extra_min)
     save_plan(user, d, start, comps, meta)
+
+
+def _preview_recompute(plan):
+    """Oppdater km/tid og stopp-nummer for en plan i forhåndsvisningen (uten lagring)."""
+    comps = plan["companies"]
+    meta = plan["meta"]
+    poly = [(p[0], p[1]) for p in (meta.get("route_pts") or [])]
+    speed = float(_settings.get("speed_kmh") or 70)
+    if len(poly) >= 2:
+        _, _, base_km = _poly_cum(poly)
+        base_drive = routing.travel_minutes(base_km, speed, 1.3)
+    else:
+        base_km, base_drive = 0.0, 0.0
+    extra_km = sum(float(c.get("leg_km") or 0) for c in comps)
+    extra_min = sum(float(c.get("visit_min") or 0) + float(c.get("extra_min") or 0) for c in comps)
+    for i, c in enumerate(comps, 1):
+        c["stop"] = i
+    meta["total_km"] = round(base_km + extra_km, 1)
+    meta["total_min"] = round(base_drive + extra_min)
 
 
 def _perp_to_poly(poly, lat, lon):
@@ -1546,8 +1630,10 @@ if nav == "Planlegging":
                 if len(plans) == 1:
                     leaflet_route_html(p["start"], p["companies"], dest=meta.get("dest"),
                                        route_pts=meta.get("route_pts"))
+                if not p["companies"]:
+                    st.caption("Ingen forslag igjen for denne dagen.")
                 for i, c in enumerate(p["companies"], 1):
-                    bits = [f"**{i}. {c.get('navn', '')}**"]
+                    org = str(c.get("orgnr"))
                     sub = []
                     if c.get("poststed"):
                         sub.append(c["poststed"])
@@ -1557,7 +1643,25 @@ if nav == "Planlegging":
                         sub.append(f"omvei {c['detour_km']:.0f} km (+{c.get('extra_min', 0):.0f} min)")
                     if c.get("retning"):
                         sub.append(c["retning"])
-                    st.markdown(bits[0] + (("  \n" + " · ".join(sub)) if sub else ""))
+                    ctxt, cbyt, cfj = st.columns([6, 1.3, 1])
+                    ctxt.markdown(f"**{i}. {c.get('navn', '')}**"
+                                  + (("  \n" + " · ".join(sub)) if sub else ""))
+                    if cbyt.button("Bytt", key=f"pv_byt_{pi}_{org}", use_container_width=True,
+                                   help="Finn en annen bedrift i nærheten i stedet"):
+                        alt = alt_company(meta, p["companies"], org)
+                        if alt:
+                            p["companies"][i - 1] = alt
+                            _preview_recompute(p)
+                            st.rerun()
+                        else:
+                            st.toast("Fant ingen annen aktuell bedrift i nærheten.")
+                    if cfj.button("✕", key=f"pv_fj_{pi}_{org}", use_container_width=True,
+                                  help="Fjern dette forslaget"):
+                        p["companies"].pop(i - 1)
+                        _preview_recompute(p)
+                        st.rerun()
+        st.caption("Fjern forslag du ikke vil ha med «✕», eller bytt det ut med en annen "
+                   "bedrift i nærheten med «Bytt». Ingenting lagres før du godkjenner.")
         st.divider()
         c_ok, c_no = st.columns([2, 1])
         if c_ok.button("Godkjenn og legg i Min dag", type="primary",
@@ -1772,7 +1876,7 @@ if nav == "Planlegging":
                             status, msg, plans = plan_legs(
                                 [{"date": days[0], "places": places, "retur": ss["w_retur"]}],
                                 ss["w_hours"], ss["w_visit"], valgte, ss["w_org"], ss["w_det"],
-                                int(ss["w_antall"]))
+                                int(ss["w_antall"]), area_km=ss["w_max"])
                         else:
                             status, msg, plans = plan_area(days, ss["w_start"], ss["w_hours"],
                                                            ss["w_visit"], valgte, ss["w_org"],
@@ -1787,7 +1891,7 @@ if nav == "Planlegging":
                         if legs:
                             status, msg, plans = plan_legs(legs, ss["w_hours"], ss["w_visit"],
                                                            valgte, ss["w_org"], ss["w_det"],
-                                                           int(ss["w_antall"]))
+                                                           int(ss["w_antall"]), area_km=ss["w_max"])
                         else:
                             status, msg, plans = plan_area(days, ss["w_start"], ss["w_hours"],
                                                            ss["w_visit"], valgte, ss["w_org"],
@@ -1970,6 +2074,15 @@ if nav == "Historikk":
 # =========================================================== INNSTILLINGER ====
 if nav == "Innstillinger":
     page_header("Innstillinger", "Profil og standardverdier for planlegging")
+    with st.container(border=True):
+        st.markdown("**Søkeområde**")
+        st.radio("Land", list(LAND_NAVN), key="land", horizontal=True,
+                 format_func=lambda x: LAND_NAVN[x], label_visibility="collapsed",
+                 help="Velg hvilket land bedriftssøk og ruteplanlegging bruker. "
+                      "Sverige henter data fra OpenStreetMap.")
+        _n_land = len(companies)
+        st.caption(f"{_n_land:,} bedrifter i {LAND_NAVN.get(current_land())}."
+                   .replace(",", " "))
     with st.form("settings"):
         c1, c2 = st.columns(2)
         with c1:
