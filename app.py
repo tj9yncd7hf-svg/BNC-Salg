@@ -636,6 +636,13 @@ if LOGIN_TOKEN and _qp.get("t") != LOGIN_TOKEN:
 _settings = load_settings(email)
 is_admin = email in ADMIN_EMAILS
 companies = load_companies(current_land())
+if not companies and current_land() != "NO":
+    # Valgt land mangler data ennå – fall tilbake til Norge så appen ikke låser seg.
+    _miss = current_land()
+    st.session_state["land"] = "NO"
+    companies = load_companies("NO")
+    st.session_state["_toast"] = (f"Data for {LAND_NAVN.get(_miss, _miss)} er ikke lagt inn "
+                                   "ennå – viser Norge.")
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -1683,6 +1690,11 @@ if nav == "Planlegging":
 
     # ------------------------------------------------- STEG 1 · PERIODE --------
     if ss["pl_step"] == 1:
+        lc1, lc2 = st.columns([1, 2])
+        lc1.radio("Land", list(LAND_NAVN), key="land", horizontal=True,
+                  format_func=lambda x: LAND_NAVN[x],
+                  help="Velg land før du søker. Styrer både stedssøk og hvilke bedrifter "
+                       "som foreslås.")
         st.markdown("#### Når skal du reise?")
         st.caption(f"Velg én dag eller en periode. I dag er {UKEDAGER[today.weekday()]} "
                    f"{today.strftime('%d.%m.%Y')}.")
