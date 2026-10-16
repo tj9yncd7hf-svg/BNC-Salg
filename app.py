@@ -326,19 +326,8 @@ def land_picker(widget_key, **kw):
 
 
 def google_q(c):
-    """Google Maps-søk på bedriften ved posisjonen – lander på riktig filial, ikke bare
-    kjeden (f.eks. «Circle K»). Tar med navn + adresse/poststed. Faller tilbake til
-    vanlig Google-søk hvis koordinat mangler."""
-    parts = [c.get("navn", "")]
-    for f in ("adresse", "poststed", "kommune"):
-        v = (c.get(f) or "").strip()
-        if v and v.lower() not in " ".join(parts).lower():
-            parts.append(v)
-    q = urllib.parse.quote_plus(" ".join(p for p in parts if p).strip())
-    lat, lon = c.get("lat"), c.get("lon")
-    if lat is not None and lon is not None:
-        return f"https://www.google.com/maps/search/{q}/@{lat},{lon},14z"
-    return f"https://www.google.com/search?q={q}"
+    """Vanlig Google-søk på bedriftsnavnet."""
+    return "https://www.google.com/search?q=" + urllib.parse.quote_plus(c.get("navn", ""))
 
 
 def geocode(text, land=None):
@@ -1841,7 +1830,7 @@ if nav == "Planlegging":
                                           help="Åpne bedriftens nettside i ny fane")
                     else:
                         cgoog.link_button("Google", google_q(c), use_container_width=True,
-                                          help="Finn bedriften i Google Maps (ved adressen)")
+                                          help="Google-søk på bedriften i ny fane")
                     if cbyt.button("Bytt", key=f"pv_byt_{pi}_{org}", use_container_width=True,
                                    help="Finn en annen bedrift i nærheten i stedet"):
                         alt = alt_company(meta, p["companies"], org)
