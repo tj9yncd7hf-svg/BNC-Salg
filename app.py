@@ -1312,7 +1312,7 @@ def route_map(start, route, dest=None, route_pts=None):
 
 
 def leaflet_route_html(start, route, height=360, line_color="#1b2a4a", dest=None,
-                       route_pts=None):
+                       route_pts=None, focus=None):
     """Robust kart (Leaflet i iframe) – virker også inne i expandere, der pydeck feiler.
     route_pts = den faste kjøreruta (korridoren) som tegnes som linje. dest = sluttpunkt
     (Til/hjem, rødt). Besøkene vises som nummererte punkter langs ruta."""
@@ -1341,7 +1341,7 @@ def leaflet_route_html(start, route, height=360, line_color="#1b2a4a", dest=None
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>html,body{margin:0}#map{height:__H__px;width:100%}</style></head>
 <body><div id="map"></div><script>
-var pts=__DATA__, line="__LINE__", path=__PATH__;
+var pts=__DATA__, line="__LINE__", path=__PATH__, focus=__FOCUS__;
 var map=L.map('map',{scrollWheelZoom:false});
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
  {maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
@@ -1354,7 +1354,9 @@ pts.forEach(function(p){var c=p.kind=='start'?'#1f9d5b':(p.kind=='dest'?'#c0392b
  L.marker([p.lat,p.lon],{icon:ic(p.label,c)}).addTo(map).bindTooltip(p.label+'. '+p.navn);});
 var allpts=path.concat(pts.map(function(p){return [p.lat,p.lon];}));
 var b=L.latLngBounds(allpts);
-function fit(){if(allpts.length>1){map.fitBounds(b,{padding:[30,30],maxZoom:13});}
+if(focus){L.circleMarker(focus,{radius:17,color:'#e67e22',weight:3,fill:false}).addTo(map);}
+function fit(){if(focus){map.setView(focus,16);return;}
+ if(allpts.length>1){map.fitBounds(b,{padding:[30,30],maxZoom:13});}
  else{map.setView(allpts[0],12);}}
 fit();
 setTimeout(function(){map.invalidateSize();fit();},300);
@@ -1362,6 +1364,7 @@ setTimeout(function(){map.invalidateSize();fit();},800);
 </script></body></html>"""
     html = (tmpl.replace("__DATA__", json.dumps(pts))
                 .replace("__PATH__", json.dumps(line))
+                .replace("__FOCUS__", json.dumps(focus if focus else None))
                 .replace("__LINE__", line_color)
                 .replace("__H__", str(height)))
     import streamlit.components.v1 as components
@@ -1372,7 +1375,7 @@ DAY_HEX = ["#1b2a4a", "#c0392b", "#1f9d5b", "#e67e22", "#8e44ad",
            "#2980b9", "#16a085", "#d4ac0d"]
 
 
-def leaflet_multi_html(plans, height=420):
+def leaflet_multi_html(plans, height=420, focus=None):
     """Samlet flerdagerskart (Leaflet) – én farge per dag, nummererte stopp + forklaring."""
     paths, pts, legend = [], [], []
     for di, p in enumerate(plans):
@@ -1404,7 +1407,7 @@ def leaflet_multi_html(plans, height=420):
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>html,body{margin:0}#map{height:__H__px;width:100%}</style></head>
 <body><div id="map"></div><script>
-var paths=__PATHS__, pts=__PTS__;
+var paths=__PATHS__, pts=__PTS__, focus=__FOCUS__;
 var map=L.map('map',{scrollWheelZoom:false});
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
  {maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
@@ -1418,13 +1421,16 @@ function ic(l,c){return L.divIcon({className:'',iconSize:[22,22],iconAnchor:[11,
 pts.forEach(function(p){ L.marker([p.lat,p.lon],{icon:ic(p.label,p.color)}).addTo(map)
  .bindTooltip(p.dag+' · '+p.label+'. '+p.navn); all.push([p.lat,p.lon]); });
 var b=L.latLngBounds(all);
-function fit(){ if(all.length>1){map.fitBounds(b,{padding:[25,25]});} else if(all.length){map.setView(all[0],11);} }
+if(focus){L.circleMarker(focus,{radius:17,color:'#e67e22',weight:3,fill:false}).addTo(map);}
+function fit(){ if(focus){map.setView(focus,16);return;}
+ if(all.length>1){map.fitBounds(b,{padding:[25,25]});} else if(all.length){map.setView(all[0],11);} }
 fit();
 setTimeout(function(){map.invalidateSize();fit();},300);
 setTimeout(function(){map.invalidateSize();fit();},800);
 </script></body></html>"""
     html = (tmpl.replace("__PATHS__", json.dumps(paths))
                 .replace("__PTS__", json.dumps(pts))
+                .replace("__FOCUS__", json.dumps(focus if focus else None))
                 .replace("__H__", str(height)))
     import streamlit.components.v1 as components
     components.html(html, height=height + 4)
@@ -1781,6 +1787,7 @@ if nav == "Planlegging":
     ss.setdefault("w_det", 15)
     ss.setdefault("pl_review", False)
     ss.setdefault("pl_preview", [])
+    ss.setdefault("pv_focus", None)
     if ss["pl_step"] > 1 and ss["w_from"] is None:
         ss["pl_step"] = 1
 
@@ -1794,9 +1801,14 @@ if nav == "Planlegging":
         tot_n = sum(len(p["companies"]) for p in plans)
         st.markdown("#### Forslag til rute – godkjenn for å legge i Min dag")
         st.caption(f"{len(plans)} dag(er) · {tot_n} forslag · ca. {tot_km:.0f} km totalt. "
+                   "Klikk på en bedrift for å zoome til den i kartet. "
                    "Ingenting lagres før du trykker «Godkjenn».")
+        _focus = ss.get("pv_focus")
+        if _focus and st.button("Vis hele ruta i kartet", key="pv_focus_clear"):
+            ss["pv_focus"] = None
+            st.rerun()
         if len(plans) > 1:
-            leaflet_multi_html(plans)
+            leaflet_multi_html(plans, focus=_focus)
         for pi, p in enumerate(plans):
             d = date.fromisoformat(p["plan_date"])
             meta = p["meta"]
@@ -1805,7 +1817,7 @@ if nav == "Planlegging":
                              f"{float(meta.get('total_km') or 0):.0f} km", expanded=(len(plans) == 1)):
                 if len(plans) == 1:
                     leaflet_route_html(p["start"], p["companies"], dest=meta.get("dest"),
-                                       route_pts=meta.get("route_pts"))
+                                       route_pts=meta.get("route_pts"), focus=_focus)
                 if not p["companies"]:
                     st.caption("Ingen forslag igjen for denne dagen.")
                 for i, c in enumerate(p["companies"], 1):
@@ -1820,8 +1832,15 @@ if nav == "Planlegging":
                     if c.get("retning"):
                         sub.append(c["retning"])
                     ctxt, cgoog, cbyt, cfj = st.columns([5, 1.5, 1.3, 1])
-                    ctxt.markdown(f"**{i}. {c.get('navn', '')}**"
-                                  + (("  \n" + " · ".join(sub)) if sub else ""))
+                    with ctxt:
+                        if st.button(f"{i}. {c.get('navn', '')}", key=f"pv_focus_{pi}_{org}",
+                                     type="tertiary", use_container_width=True,
+                                     help="Zoom til denne bedriften i kartet"):
+                            if c.get("lat") is not None:
+                                ss["pv_focus"] = [c["lat"], c["lon"]]
+                                st.rerun()
+                        if sub:
+                            st.caption(" · ".join(sub))
                     site = (c.get("nettside") or "").strip()
                     if site:
                         _url = (site if site.lower().startswith(("http://", "https://"))
@@ -1855,12 +1874,14 @@ if nav == "Planlegging":
             n = len(plans)
             ss["pl_preview"] = []
             ss["pl_review"] = False
+            ss["pv_focus"] = None
             ss["pl_step"] = 1
             st.session_state["_toast"] = f"{n} dag(er) lagt i Min dag."
             st.rerun()
         if c_no.button("Forkast", use_container_width=True):
             ss["pl_preview"] = []
             ss["pl_review"] = False
+            ss["pv_focus"] = None
             st.rerun()
         st.stop()
 
@@ -2125,6 +2146,7 @@ if nav == "Planlegging":
                 if status == "ok":
                     ss["pl_preview"] = plans
                     ss["pl_review"] = True
+                    ss["pv_focus"] = None
                     st.rerun()
                 elif status == "tom":
                     st.warning(msg)
