@@ -325,6 +325,22 @@ def land_picker(widget_key, **kw):
     return sel
 
 
+def google_q(c):
+    """Google Maps-søk på bedriften ved posisjonen – lander på riktig filial, ikke bare
+    kjeden (f.eks. «Circle K»). Tar med navn + adresse/poststed. Faller tilbake til
+    vanlig Google-søk hvis koordinat mangler."""
+    parts = [c.get("navn", "")]
+    for f in ("adresse", "poststed", "kommune"):
+        v = (c.get(f) or "").strip()
+        if v and v.lower() not in " ".join(parts).lower():
+            parts.append(v)
+    q = urllib.parse.quote_plus(" ".join(p for p in parts if p).strip())
+    lat, lon = c.get("lat"), c.get("lon")
+    if lat is not None and lon is not None:
+        return f"https://www.google.com/maps/search/{q}/@{lat},{lon},14z"
+    return f"https://www.google.com/search?q={q}"
+
+
 def geocode(text, land=None):
     """Startpunkt: 1) adresse, 2) stedsnavn, 3) POI (Nominatim). Dekker «gate nr,
     sted», «Molde lufthavn» og dagligtale som «molde flyplass».
@@ -1817,10 +1833,15 @@ if nav == "Planlegging":
                     ctxt, cgoog, cbyt, cfj = st.columns([5, 1.5, 1.3, 1])
                     ctxt.markdown(f"**{i}. {c.get('navn', '')}**"
                                   + (("  \n" + " · ".join(sub)) if sub else ""))
-                    g_q = urllib.parse.quote_plus(c.get("navn", ""))
-                    cgoog.link_button("Google", f"https://www.google.com/search?q={g_q}",
-                                      use_container_width=True,
-                                      help="Google-søk på bedriften i ny fane")
+                    site = (c.get("nettside") or "").strip()
+                    if site:
+                        _url = (site if site.lower().startswith(("http://", "https://"))
+                                else "https://" + site)
+                        cgoog.link_button("Nettside", _url, use_container_width=True,
+                                          help="Åpne bedriftens nettside i ny fane")
+                    else:
+                        cgoog.link_button("Google", google_q(c), use_container_width=True,
+                                          help="Finn bedriften i Google Maps (ved adressen)")
                     if cbyt.button("Bytt", key=f"pv_byt_{pi}_{org}", use_container_width=True,
                                    help="Finn en annen bedrift i nærheten i stedet"):
                         alt = alt_company(meta, p["companies"], org)
