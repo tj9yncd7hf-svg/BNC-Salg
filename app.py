@@ -1816,14 +1816,10 @@ if nav == "Planlegging":
                    "Klikk på en bedrift for å zoome til den i kartet. "
                    "Ingenting lagres før du trykker «Godkjenn».")
         st.caption(
-            "Obs om adressene: Vi bruker den adressen som er **registrert i Brønnøysund** "
-            "(for Sverige: OpenStreetMap). Den er ikke alltid den samme som der bedriften "
-            "faktisk holder til – noen er registrert på regnskapsførerens eller hovedkontorets "
-            "adresse, og noen har flyttet uten å oppdatere registeret. Da kan den oppgitte "
-            "adressen (og dermed plasseringen i kartet) være et annet sted enn den virkelige "
-            "butikken/verkstedet. De aller fleste stemmer, men **sjekk «Nettside» eller "
-            "«Google» før du drar** hvis noe ser rart ut. Nettside mangler også på en del "
-            "bedrifter, fordi ikke alle har registrert den.")
+            "Obs om adressene: Vi bruker den adressen som er registrert i Brønnøysund for "
+            "Norge, for Sverige: SCB (Statistiska centralbyrån). Den er ikke alltid den samme "
+            "som der bedriften faktisk holder til. Sjekk «Nettside» eller «Google» før du drar "
+            "hvis noe ser rart ut.")
         _focus = ss.get("pv_focus")
         if _focus and st.button("Vis hele ruta i kartet", key="pv_focus_clear"):
             ss["pv_focus"] = None
