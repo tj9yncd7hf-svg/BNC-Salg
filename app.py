@@ -312,6 +312,19 @@ def current_land():
     return st.session_state.get("land", "NO")
 
 
+def land_picker(widget_key, **kw):
+    """Robust land-velger: skriver til den vanlige nøkkelen ss['land'] (ikke en
+    widget-nøkkel), så valget huskes på tvers av steg/sider – en widget-verdi kan
+    ellers nullstilles når widgeten ikke vises på alle steg."""
+    opts = list(LAND_NAVN)
+    cur = st.session_state.get("land", "NO")
+    sel = st.radio("Land", opts, index=opts.index(cur) if cur in opts else 0,
+                   key=widget_key, horizontal=True,
+                   format_func=lambda x: LAND_NAVN[x], **kw)
+    st.session_state["land"] = sel
+    return sel
+
+
 def geocode(text, land=None):
     """Startpunkt: 1) adresse, 2) stedsnavn, 3) POI (Nominatim). Dekker «gate nr,
     sted», «Molde lufthavn» og dagligtale som «molde flyplass».
@@ -1846,10 +1859,10 @@ if nav == "Planlegging":
     # ------------------------------------------------- STEG 1 · PERIODE --------
     if ss["pl_step"] == 1:
         lc1, lc2 = st.columns([1, 2])
-        lc1.radio("Land", list(LAND_NAVN), key="land", horizontal=True,
-                  format_func=lambda x: LAND_NAVN[x],
-                  help="Velg land før du søker. Styrer både stedssøk og hvilke bedrifter "
-                       "som foreslås.")
+        with lc1:
+            land_picker("land_pl",
+                        help="Velg land før du søker. Styrer både stedssøk og hvilke "
+                             "bedrifter som foreslås.")
         st.markdown("#### Når skal du reise?")
         st.caption(f"Velg én dag eller en periode. I dag er {UKEDAGER[today.weekday()]} "
                    f"{today.strftime('%d.%m.%Y')}.")
@@ -2284,10 +2297,9 @@ if nav == "Innstillinger":
     page_header("Innstillinger", "Profil og standardverdier for planlegging")
     with st.container(border=True):
         st.markdown("**Søkeområde**")
-        st.radio("Land", list(LAND_NAVN), key="land", horizontal=True,
-                 format_func=lambda x: LAND_NAVN[x], label_visibility="collapsed",
-                 help="Velg hvilket land bedriftssøk og ruteplanlegging bruker. "
-                      "Sverige henter data fra OpenStreetMap.")
+        land_picker("land_set", label_visibility="collapsed",
+                    help="Velg hvilket land bedriftssøk og ruteplanlegging bruker. "
+                         "Sverige henter data fra OpenStreetMap.")
         _n_land = len(companies)
         st.caption(f"{_n_land:,} bedrifter i {LAND_NAVN.get(current_land())}."
                    .replace(",", " "))
