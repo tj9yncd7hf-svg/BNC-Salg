@@ -1157,11 +1157,13 @@ def leaflet_route_html(start, route, height=360, line_color="#1b2a4a", dest=None
     if start and start.get("lat") is not None:
         pts.append({"lat": start["lat"], "lon": start["lon"], "label": "S",
                     "navn": start.get("label") or "Start", "kind": "start"})
+    nr = 0
     for s in route:
         if s.get("lat") is None:
             continue
+        nr += 1
         rt = s.get("retning")
-        pts.append({"lat": s["lat"], "lon": s["lon"], "label": str(s.get("stop", "")),
+        pts.append({"lat": s["lat"], "lon": s["lon"], "label": str(nr),
                     "navn": s.get("navn", "") + (f" · {rt}" if rt else ""), "kind": "stop"})
     if dest and dest.get("lat") is not None:
         pts.append({"lat": dest["lat"], "lon": dest["lon"], "label": "M",
@@ -1224,10 +1226,12 @@ def leaflet_multi_html(plans, height=420):
             dag = p.get("plan_date", "")
         if comps:
             legend.append((col, dag))
+        nr = 0
         for s in comps:
             if s.get("lat") is None:
                 continue
-            pts.append({"lat": s["lat"], "lon": s["lon"], "label": str(s.get("stop", "")),
+            nr += 1
+            pts.append({"lat": s["lat"], "lon": s["lon"], "label": str(nr),
                         "navn": s.get("navn", ""), "dag": dag, "color": col})
     if not pts and not paths:
         st.caption("Ingen punkter å vise på kart.")
@@ -1601,6 +1605,8 @@ if nav == "Planlegging":
     ss.setdefault("w_til", "")
     ss.setdefault("w_vias", [])
     ss.setdefault("w_legs", [])
+    ss.setdefault("w_trip_mode", "base")
+    ss.setdefault("w_base", "")
     ss.setdefault("w_retur", False)
     ss.setdefault("w_antall", 6)
     ss.setdefault("w_org", "AS + ENK")
@@ -1798,24 +1804,39 @@ if nav == "Planlegging":
             st.caption("Med destinasjon foreslås drop-in langs veien (og hjemveien ved tur-retur). "
                        "Uten destinasjon foreslås drop-in rundt startstedet.")
         else:
-            st.markdown("##### Reiserute – én etappe per dag")
-            st.caption("Skriv hvor du ender hver dag (overnatting). Neste dag starter der. "
-                       "Siste dag: sett sluttsted, f.eks. hjem.")
-            if len(ss["w_legs"]) != len(days):
-                old = ss["w_legs"]
-                ss["w_legs"] = [old[i] if i < len(old) else "" for i in range(len(days))]
-            prev = (ss["w_start"] or "").strip() or "start"
-            for i, dy in enumerate(days):
-                st.markdown(f"**Dag {i + 1} · {UKEDAGER[dy.weekday()].capitalize()} "
-                            f"{dy.strftime('%d.%m')}**  "
-                            f"<span class='bnc-sub'>— fra {prev}</span>", unsafe_allow_html=True)
-                ss["w_legs"][i] = st.text_input(f"Til / overnatting dag {i + 1}",
-                                                value=ss["w_legs"][i], key=f"_w_leg_{i}",
-                                                placeholder="F.eks. Oslo",
-                                                label_visibility="collapsed")
-                nxt = (ss["w_legs"][i] or "").strip()
-                prev = nxt if nxt else "(samme sted)"
-            st.caption("La en dag stå tom hvis du bare vil jobbe området rundt startstedet.")
+            st.radio("Reisemåte", ["base", "tour"], key="w_trip_mode", horizontal=True,
+                     format_func=lambda x: {"base": "Fast base (jobbe flere dager samme sted)",
+                                            "tour": "Rundreise (nytt sted hver dag)"}[x])
+            if ss["w_trip_mode"] == "base":
+                ss["w_base"] = st.text_input("Reisemål · der du jobber flere dager",
+                                             value=ss["w_base"], key="_w_base",
+                                             placeholder="F.eks. Trondheim")
+                _b = (ss["w_base"] or "").strip()
+                if _b:
+                    st.caption(f"Dag 1 er reisedagen {ss['w_start'] or 'start'} → {_b} "
+                               f"med bedrifter på veien. De øvrige dagene foreslås bedrifter "
+                               f"rundt {_b}. Du slipper å skrive {_b} på hver dag.")
+                else:
+                    st.caption("Skriv reisemålet én gang – det gjelder alle dagene.")
+            else:
+                st.markdown("##### Reiserute – én etappe per dag")
+                st.caption("Skriv hvor du ender hver dag (overnatting). Neste dag starter der. "
+                           "Siste dag: sett sluttsted, f.eks. hjem.")
+                if len(ss["w_legs"]) != len(days):
+                    old = ss["w_legs"]
+                    ss["w_legs"] = [old[i] if i < len(old) else "" for i in range(len(days))]
+                prev = (ss["w_start"] or "").strip() or "start"
+                for i, dy in enumerate(days):
+                    st.markdown(f"**Dag {i + 1} · {UKEDAGER[dy.weekday()].capitalize()} "
+                                f"{dy.strftime('%d.%m')}**  "
+                                f"<span class='bnc-sub'>— fra {prev}</span>", unsafe_allow_html=True)
+                    ss["w_legs"][i] = st.text_input(f"Til / overnatting dag {i + 1}",
+                                                    value=ss["w_legs"][i], key=f"_w_leg_{i}",
+                                                    placeholder="F.eks. Oslo",
+                                                    label_visibility="collapsed")
+                    nxt = (ss["w_legs"][i] or "").strip()
+                    prev = nxt if nxt else "(samme sted)"
+                st.caption("La en dag stå tom hvis du bare vil jobbe området rundt startstedet.")
 
         bk, nx = st.columns(2)
         if bk.button("←  Tilbake", use_container_width=True):
@@ -1830,8 +1851,15 @@ if nav == "Planlegging":
     else:
         fr = ss["w_from"]
         to = ss["w_to"] or ss["w_from"]
-        area = (ss["w_start"] or "start") + (f" → {ss['w_til']}" if (ss["w_til"] or "").strip()
-                                             else " (området rundt)")
+        _multi3 = (to - fr).days > 0
+        if _multi3 and ss["w_trip_mode"] == "base" and (ss["w_base"] or "").strip():
+            area = f"{ss['w_start'] or 'start'} → {ss['w_base'].strip()} (base, flere dager)"
+        elif _multi3 and ss["w_trip_mode"] == "tour":
+            area = f"{ss['w_start'] or 'start'} (rundreise)"
+        else:
+            area = (ss["w_start"] or "start") + (f" → {ss['w_til']}"
+                                                 if (ss["w_til"] or "").strip()
+                                                 else " (området rundt)")
         st.markdown(f"<div class='psum'><span><span class='pv'>{area}</span></span></div>",
                     unsafe_allow_html=True)
 
@@ -1893,6 +1921,16 @@ if nav == "Planlegging":
                             status, msg, plans = plan_area(days, ss["w_start"], ss["w_hours"],
                                                            ss["w_visit"], valgte, ss["w_org"],
                                                            ss["w_max"], int(ss["w_antall"]))
+                    elif ss["w_trip_mode"] == "base" and (ss["w_base"] or "").strip():
+                        base = ss["w_base"].strip()
+                        start0 = (ss["w_start"] or "").strip() or base
+                        legs = []
+                        for i, dy in enumerate(days):
+                            frm = start0 if i == 0 else base
+                            legs.append({"date": dy, "places": [frm, base], "retur": False})
+                        status, msg, plans = plan_legs(legs, ss["w_hours"], ss["w_visit"],
+                                                       valgte, ss["w_org"], ss["w_det"],
+                                                       int(ss["w_antall"]), area_km=ss["w_max"])
                     else:
                         legs, prev = [], (ss["w_start"] or "").strip()
                         for i, dy in enumerate(days):
