@@ -164,12 +164,18 @@ st.markdown("""
   div.stButton>button[kind="primary"]{ background:#1b2a4a; border-color:#1b2a4a; color:#fff; border-radius:10px; font-weight:600; }
   div.stButton>button[kind="primary"]:hover{ background:#2a3e66; border-color:#2a3e66; }
   div.stButton>button[kind="secondary"]{ border-radius:10px; }
-  /* Klikkbart bedriftsnavn i forslagslista: venstrestilt, fet, mørk – som ren tekst */
-  div.stButton>button[kind="tertiary"]{ justify-content:flex-start !important; text-align:left;
-    padding:0 !important; min-height:0 !important; color:#1c2534; font-weight:700;
-    font-size:15px; line-height:1.35; }
-  div.stButton>button[kind="tertiary"] p{ font-weight:700; margin:0; }
-  div.stButton>button[kind="tertiary"]:hover{ color:#1b2a4a; text-decoration:underline; }
+  /* Klikkbart bedriftsnavn i forslagslista: venstrestilt, fet, mørk – som ren tekst.
+     Bred selektor så den treffer uansett Streamlit-versjon (kind- eller data-testid). */
+  button[kind="tertiary"], button[data-testid="stBaseButton-tertiary"],
+  [data-testid="stButton"] button[kind="tertiary"]{
+    justify-content:flex-start !important; text-align:left !important;
+    padding:0 !important; min-height:0 !important; border:none !important;
+    color:#1c2534 !important; font-weight:700; font-size:15px; line-height:1.35; }
+  button[kind="tertiary"] p, button[data-testid="stBaseButton-tertiary"] p,
+  button[kind="tertiary"] div, button[data-testid="stBaseButton-tertiary"] div{
+    text-align:left !important; width:100%; font-weight:700; margin:0; }
+  button[kind="tertiary"]:hover, button[data-testid="stBaseButton-tertiary"]:hover{
+    color:#1b2a4a !important; text-decoration:underline; }
   a[data-testid="stBaseLinkButton-secondary"], a[data-testid="baseLinkButton-secondary"]{ border-radius:10px; }
   div[data-testid="stVerticalBlockBorderWrapper"]{ background:#fff; border-radius:12px; }
   .bnc-sub{ color:#6a7488; font-size:13.5px; margin-top:-6px; }
