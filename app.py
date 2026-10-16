@@ -2089,10 +2089,12 @@ if nav == "Planlegging":
         else:
             bsum = "ingen valgt"
         with st.expander(f"Bransjer: {bsum}"):
-            ss["w_all"] = st.checkbox("Alle aktuelle bransjer", value=ss["w_all"], key="_w_all")
+            # NB: ikke bruk både `key` og `default`/`value` på disse – da nullstiller
+            # Streamlit valget til default ved hver rerun (kun det første blir stående).
+            ss["w_all"] = st.checkbox("Alle aktuelle bransjer", value=ss["w_all"])
             ss["w_cat"] = st.multiselect("…eller velg selv", _kat_present,
                                          default=[c for c in ss["w_cat"] if c in _kat_present],
-                                         key="_w_cat", disabled=ss["w_all"])
+                                         disabled=ss["w_all"])
         with st.expander("Flere valg"):
             if current_land() == "NO":
                 _orgs = ["AS + ENK", "Kun AS", "Kun ENK"]
