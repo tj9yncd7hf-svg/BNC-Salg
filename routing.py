@@ -28,15 +28,15 @@ def travel_minutes(km, speed_kmh=DEFAULT_SPEED_KMH, detour=DEFAULT_DETOUR):
 
 def plan_route(start_lat, start_lon, candidates, hours_available,
                visit_minutes=60.0, speed_kmh=DEFAULT_SPEED_KMH, detour=DEFAULT_DETOUR,
-               max_leg_km=None, return_to_start=False):
-    """Foreslå en besøksrute innenfor tidsbudsjettet.
+               max_leg_km=None, return_to_start=False, max_stops=None):
+    """Foreslå en besøksrute (grådig nærmeste nabo).
+
+    Styres av `max_stops` (antall besøk) når den er satt – da ignoreres tidsbudsjettet,
+    slik at «antall besøk» bestemmer (Kim tar de han rekker). Er `max_stops` None, brukes
+    tidsbudsjettet `hours_available` som før.
 
     candidates: liste av dict med minst 'lat' og 'lon' (og gjerne 'orgnr','navn').
-    Returnerer dict:
-      route        – ordnet liste av besøk, hvert med leg_km, leg_min, cum_min, sum_km
-      total_min    – total planlagt tid (kjøring + besøk, evt. retur)
-      total_km     – total kjørelengde
-      skipped      – antall kandidater som ikke fikk plass
+    Returnerer dict: route, total_min, total_km, skipped, n_candidates.
     """
     budget = float(hours_available) * 60.0
     pool = [c for c in candidates
@@ -48,6 +48,8 @@ def plan_route(start_lat, start_lon, candidates, hours_available,
     chosen = set()
 
     while True:
+        if max_stops and len(route) >= int(max_stops):
+            break
         best = None
         best_km = None
         for i, c in enumerate(pool):
@@ -67,9 +69,9 @@ def plan_route(start_lat, start_lon, candidates, hours_available,
         if return_to_start:
             back_km = haversine_km(float(c["lat"]), float(c["lon"]), start_lat, start_lon)
             back_min = travel_minutes(back_km, speed_kmh, detour)
-        if used_min + leg_min + visit_minutes + back_min > budget:
-            # Dette besøket (med evt. retur) sprenger budsjettet – stopp.
-            # Prøv ikke andre: nærmeste som ikke passer betyr resten ligger lenger unna.
+        if max_stops is None and used_min + leg_min + visit_minutes + back_min > budget:
+            # Tidsbudsjett-modus: dette besøket sprenger dagen – stopp.
+            # (Når max_stops styrer, ignoreres budsjettet – antall besøk bestemmer.)
             break
         used_min += leg_min + visit_minutes
         total_km += best_km

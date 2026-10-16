@@ -322,16 +322,36 @@ def geocode(text, land=None):
     if land is None:
         land = current_land()
     if land == "SE":
+        ua = {"User-Agent": "BNC-Selger/1.0 (post@bncnordic.no)"}
+        # 1) Photon (server-vennlig, tåler ø/ä/ö). Velg første svenske treff.
         try:
-            r = requests.get("https://nominatim.openstreetmap.org/search",
-                             params={"q": t, "format": "json", "limit": 1, "countrycodes": "se"},
-                             headers={"User-Agent": "BNC-Selger/1.0 (post@bncnordic.no)"},
-                             timeout=15)
-            js = r.json()
-            if js:
-                return float(js[0]["lat"]), float(js[0]["lon"]), js[0].get("display_name", t).split(",")[0] or t
+            r = requests.get("https://photon.komoot.io/api/",
+                             params={"q": t, "limit": 5, "lang": "default"},
+                             headers=ua, timeout=15)
+            for f in (r.json().get("features") or []):
+                p = f.get("properties") or {}
+                if p.get("countrycode") == "SE":
+                    co = f.get("geometry", {}).get("coordinates")
+                    if co:
+                        return float(co[1]), float(co[0]), p.get("name") or t
         except Exception:
             pass
+        # 2) Nominatim som reserve (prøv også ø→ö / æ→ä for norsk skrivemåte).
+        variants = [t]
+        norm = (t.replace("ø", "ö").replace("Ø", "Ö").replace("æ", "ä").replace("Æ", "Ä"))
+        if norm != t:
+            variants.append(norm)
+        for qq in variants:
+            try:
+                r = requests.get("https://nominatim.openstreetmap.org/search",
+                                 params={"q": qq, "format": "json", "limit": 1,
+                                         "countrycodes": "se"}, headers=ua, timeout=15)
+                js = r.json()
+                if js:
+                    return (float(js[0]["lat"]), float(js[0]["lon"]),
+                            js[0].get("display_name", qq).split(",")[0] or qq)
+            except Exception:
+                pass
         return None, None, text
     def _adr():
         r = requests.get("https://ws.geonorge.no/adresser/v1/sok",
@@ -955,7 +975,8 @@ def plan_area(days, start_txt, hours, visit_min, valgte, orgvalg, maxkm, n_visit
     for day in days:
         cands = [c for c in pool if str(c.get("orgnr")) not in used]
         res = routing.plan_route(slat, slon, cands, hours,
-                                 visit_minutes=visit_min, max_leg_km=maxkm)
+                                 visit_minutes=visit_min, max_leg_km=maxkm,
+                                 max_stops=int(n_visits) if n_visits else 8)
         route = res["route"]
         if n_visits:
             route = route[:int(n_visits)]
@@ -1004,7 +1025,8 @@ def plan_legs(legs, hours, visit_min, valgte, orgvalg, detour, n_visits, area_km
             clabel = labels[-1]
             cands = [c for c in pool if str(c.get("orgnr")) not in used]
             res = routing.plan_route(center[0], center[1], cands, hours,
-                                     visit_minutes=visit_min, max_leg_km=area_km)
+                                     visit_minutes=visit_min, max_leg_km=area_km,
+                                     max_stops=int(n_visits) if n_visits else 8)
             route = res["route"]
             if n_visits:
                 route = route[:int(n_visits)]
@@ -2011,10 +2033,14 @@ if nav == "Planlegging":
                                          default=[c for c in ss["w_cat"] if c in _kat_present],
                                          key="_w_cat", disabled=ss["w_all"])
         with st.expander("Flere valg"):
-            _orgs = ["AS + ENK", "Kun AS", "Kun ENK"]
-            ss["w_org"] = st.selectbox("Selskapsform", _orgs,
-                                       index=_orgs.index(ss["w_org"]) if ss["w_org"] in _orgs else 0,
-                                       key="_w_org")
+            if current_land() == "NO":
+                _orgs = ["AS + ENK", "Kun AS", "Kun ENK"]
+                ss["w_org"] = st.selectbox("Selskapsform", _orgs,
+                                           index=_orgs.index(ss["w_org"]) if ss["w_org"] in _orgs else 0,
+                                           key="_w_org")
+            else:
+                # Svenske data har ikke AS/ENK slik norske har – ikke filtrer på selskapsform.
+                ss["w_org"] = "AS + ENK"
             ss["w_max"] = st.slider("Maks avstand mellom besøk (km, uten destinasjon)", 10, 300,
                                     int(ss["w_max"]), 10, key="_w_max")
             ss["w_det"] = st.slider("Maks omvei fra ruta (km)", 2, 60,
