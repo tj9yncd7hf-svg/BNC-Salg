@@ -2095,12 +2095,19 @@ if nav == "Planlegging":
         else:
             bsum = "ingen valgt"
         with st.expander(f"Bransjer: {bsum}"):
-            # NB: ikke bruk både `key` og `default`/`value` på disse – da nullstiller
-            # Streamlit valget til default ved hver rerun (kun det første blir stående).
             ss["w_all"] = st.checkbox("Alle aktuelle bransjer", value=ss["w_all"])
-            ss["w_cat"] = st.multiselect("…eller velg selv", _kat_present,
-                                         default=[c for c in ss["w_cat"] if c in _kat_present],
-                                         disabled=ss["w_all"])
+            # Kun stabil `key`, ingen `default` – da re-monteres ikke widgeten ved hvert
+            # klikk, nedtrekket holder seg åpent og flere bransjer kan velges etter hverandre.
+            _cur = st.session_state.get("_w_cat")
+            if _cur is None:
+                st.session_state["_w_cat"] = [c for c in ss["w_cat"] if c in _kat_present]
+            else:
+                _valid = [c for c in _cur if c in _kat_present]   # rydd ved f.eks. landbytte
+                if _valid != _cur:
+                    st.session_state["_w_cat"] = _valid
+            st.multiselect("…eller velg selv", _kat_present, key="_w_cat",
+                           disabled=ss["w_all"])
+            ss["w_cat"] = list(st.session_state.get("_w_cat") or [])
         with st.expander("Flere valg"):
             if current_land() == "NO":
                 _orgs = ["AS + ENK", "Kun AS", "Kun ENK"]
