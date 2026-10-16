@@ -164,6 +164,12 @@ st.markdown("""
   div.stButton>button[kind="primary"]{ background:#1b2a4a; border-color:#1b2a4a; color:#fff; border-radius:10px; font-weight:600; }
   div.stButton>button[kind="primary"]:hover{ background:#2a3e66; border-color:#2a3e66; }
   div.stButton>button[kind="secondary"]{ border-radius:10px; }
+  /* Klikkbart bedriftsnavn i forslagslista: venstrestilt, fet, mørk – som ren tekst */
+  div.stButton>button[kind="tertiary"]{ justify-content:flex-start !important; text-align:left;
+    padding:0 !important; min-height:0 !important; color:#1c2534; font-weight:700;
+    font-size:15px; line-height:1.35; }
+  div.stButton>button[kind="tertiary"] p{ font-weight:700; margin:0; }
+  div.stButton>button[kind="tertiary"]:hover{ color:#1b2a4a; text-decoration:underline; }
   a[data-testid="stBaseLinkButton-secondary"], a[data-testid="baseLinkButton-secondary"]{ border-radius:10px; }
   div[data-testid="stVerticalBlockBorderWrapper"]{ background:#fff; border-radius:12px; }
   .bnc-sub{ color:#6a7488; font-size:13.5px; margin-top:-6px; }
@@ -1849,7 +1855,9 @@ if nav == "Planlegging":
                                 ss["pv_focus"] = [c["lat"], c["lon"]]
                                 st.rerun()
                         if sub:
-                            st.caption(" · ".join(sub))
+                            st.markdown(
+                                f"<div style='color:#6a7488;font-size:13px;margin-top:-8px'>"
+                                f"{' · '.join(sub)}</div>", unsafe_allow_html=True)
                     site = (c.get("nettside") or "").strip()
                     if site:
                         _url = (site if site.lower().startswith(("http://", "https://"))
