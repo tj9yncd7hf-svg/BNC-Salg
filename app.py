@@ -290,6 +290,13 @@ def sb_delete(table, params):
     r.raise_for_status()
 
 
+def sb_update(table, params, patch):
+    r = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}",
+                       headers={**_sb_headers(), "Prefer": "return=minimal"},
+                       params=params, json=patch, timeout=20)
+    r.raise_for_status()
+
+
 # ------------------------------------------------------------------- data -----
 @st.cache_data(show_spinner=False)
 def load_companies(land="NO"):
@@ -763,6 +770,88 @@ def _subpoly(points, seg, cum, lo, hi):
     return out if len(out) >= 2 else [pts[0], pts[-1]]
 
 
+@st.cache_data(ttl=21600, show_spinner=False)
+def _osrm_routes(coords_key):
+    """Hent kjøreruter (ekte veier) fra OSRM. coords_key = 'lon,lat;lon,lat;…'.
+    Returnerer liste av {coords:[(lat,lon)…], dist_km}. Tom liste ved feil."""
+    try:
+        url = f"https://router.project-osrm.org/route/v1/driving/{coords_key}"
+        r = requests.get(url, params={"overview": "simplified", "geometries": "geojson",
+                                      "alternatives": "true"}, timeout=25)
+        j = r.json()
+    except Exception:
+        return []
+    if j.get("code") != "Ok":
+        return []
+    out = []
+    for rt in j.get("routes", []):
+        g = (rt.get("geometry") or {}).get("coordinates") or []
+        if len(g) >= 2:
+            out.append({"coords": [(la, lo) for lo, la in g],
+                        "dist_km": round((rt.get("distance") or 0) / 1000.0, 1)})
+    return out
+
+
+def _downsample(coords, step_km=2.0):
+    if len(coords) <= 2:
+        return coords
+    out, acc = [coords[0]], 0.0
+    for i in range(1, len(coords)):
+        acc += routing.haversine_km(coords[i - 1][0], coords[i - 1][1], coords[i][0], coords[i][1])
+        if acc >= step_km:
+            out.append(coords[i])
+            acc = 0.0
+    if out[-1] != coords[-1]:
+        out.append(coords[-1])
+    return out
+
+
+def _count_near(coords, cands, within_km):
+    ds = _downsample(coords, 3.0)
+    lat0, lon0 = ds[0]
+    kx = 111.320 * math.cos(math.radians(lat0))
+    ky = 110.574
+    pxy = [((lo - lon0) * kx, (la - lat0) * ky) for la, lo in ds]
+    n = 0
+    for c in cands:
+        if c.get("lat") is None:
+            continue
+        cx, cy = (c["lon"] - lon0) * kx, (c["lat"] - lat0) * ky
+        bp = 1e9
+        for i in range(len(pxy) - 1):
+            ax, ay = pxy[i]
+            bx, by = pxy[i + 1]
+            dx, dy = bx - ax, by - ay
+            s2 = dx * dx + dy * dy
+            tf = 0.0 if s2 == 0 else max(0.0, min(1.0, ((cx - ax) * dx + (cy - ay) * dy) / s2))
+            d = math.hypot(cx - (ax + tf * dx), cy - (ay + tf * dy))
+            if d < bp:
+                bp = d
+            if bp <= within_km:
+                break
+        if bp <= within_km:
+            n += 1
+    return n
+
+
+def road_corridor(waypoints, cands, within_km):
+    """Ekte vei langs waypoints [(lat,lon)…]. Blant alternativene (f.eks. E16 vs E134)
+    velges den med FLEST bedrifter innen within_km. Returnerer (coords[(lat,lon)…],
+    dist_km) nedsamplet, eller None ved feil (da brukes rett linje)."""
+    if len(waypoints) < 2:
+        return None
+    key = ";".join(f"{lo:.5f},{la:.5f}" for la, lo in waypoints)
+    routes = _osrm_routes(key)
+    if not routes:
+        return None
+    if len(routes) == 1:
+        best = routes[0]
+    else:
+        best = max(routes, key=lambda rt: (_count_near(rt["coords"], cands, within_km),
+                                           -rt["dist_km"]))
+    return _downsample(best["coords"], 1.5), best["dist_km"]
+
+
 def plan_poly(points, cands, hours, visit_min, speed, detour, target_n,
               drive_points=None, split_return=False):
     """Finner valgfrie drop-in-forslag langs en FAST kjørerute.
@@ -933,14 +1022,18 @@ def plan_legs(legs, hours, visit_min, valgte, orgvalg, detour, n_visits, area_km
             continue
 
         retur = bool(lg.get("retur"))
+        cands = [c for c in pool if str(c.get("orgnr")) not in used]
+        # Følg ekte hovedveier (E/Rv/Fv) der det er mulig; velg alternativet med
+        # flest bedrifter. Faller tilbake til rett linje hvis veirouteren ikke svarer.
+        road = road_corridor(pts, cands, max(detour, 10))
+        corridor = road[0] if road else pts
         if retur:
-            drive = pts + [pts[0]]
+            drive = corridor + list(reversed(corridor))
             dest = {"lat": pts[0][0], "lon": pts[0][1], "label": labels[0]}
         else:
-            drive = pts
+            drive = corridor
             dest = {"lat": pts[-1][0], "lon": pts[-1][1], "label": labels[-1]}
-        cands = [c for c in pool if str(c.get("orgnr")) not in used]
-        res = plan_poly(pts, cands, hours, visit_min, speed, detour, n_visits,
+        res = plan_poly(corridor, cands, hours, visit_min, speed, detour, n_visits,
                         drive_points=drive, split_return=retur)
         route = res["route"]
         for s in route:
@@ -1104,6 +1197,36 @@ def register_dialog(company):
             _m = "Besøk registrert – rapport sendt."
             st.session_state["_toast"] = _m + (" Kunden skjules fra framtidige forslag."
                                                if no_more else " Bedriften er merket besøkt.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Kunne ikke lagre: {exc}")
+
+
+VISIT_OUTCOMES = ["Interessert", "Vil tenke", "Ikke interessert",
+                  "Ikke til stede", "Solgt", "Annet"]
+
+
+@st.dialog("Rediger besøk")
+def edit_visit_dialog(r):
+    st.markdown(f"**{r.get('navn','')}**  \n"
+                f"<span class='bnc-sub'>{r.get('visited_on','')} · {r.get('kommune','')}</span>",
+                unsafe_allow_html=True)
+    opts = VISIT_OUTCOMES[:]
+    cur = r.get("outcome", "")
+    if cur and cur not in opts:
+        opts = [cur] + opts
+    with st.form(f"edit_{r.get('id')}"):
+        outcome = st.selectbox("Besøksresultat", opts,
+                               index=opts.index(cur) if cur in opts else 0)
+        report = st.text_area("Besøksrapport", value=r.get("report") or "", height=140)
+        contact = st.text_input("Kundens e-post", value=r.get("contact_email") or "")
+        lagre = st.form_submit_button("Lagre endringer", type="primary",
+                                      use_container_width=True)
+    if lagre:
+        try:
+            sb_update("visits", {"id": f"eq.{r.get('id')}"},
+                      {"outcome": outcome, "report": report, "contact_email": contact})
+            st.session_state["_toast"] = "Besøk oppdatert."
             st.rerun()
         except Exception as exc:
             st.error(f"Kunne ikke lagre: {exc}")
@@ -1656,9 +1779,13 @@ if nav == "Planlegging":
                         sub.append(f"omvei {c['detour_km']:.0f} km (+{c.get('extra_min', 0):.0f} min)")
                     if c.get("retning"):
                         sub.append(c["retning"])
-                    ctxt, cbyt, cfj = st.columns([6, 1.3, 1])
+                    ctxt, cgoog, cbyt, cfj = st.columns([5, 1.5, 1.3, 1])
                     ctxt.markdown(f"**{i}. {c.get('navn', '')}**"
                                   + (("  \n" + " · ".join(sub)) if sub else ""))
+                    g_q = urllib.parse.quote_plus(c.get("navn", ""))
+                    cgoog.link_button("Google", f"https://www.google.com/search?q={g_q}",
+                                      use_container_width=True,
+                                      help="Google-søk på bedriften i ny fane")
                     if cbyt.button("Bytt", key=f"pv_byt_{pi}_{org}", use_container_width=True,
                                    help="Finn en annen bedrift i nærheten i stedet"):
                         alt = alt_company(meta, p["companies"], org)
@@ -2110,9 +2237,14 @@ if nav == "Historikk":
             st.write(r.get("report") or "_Ingen rapporttekst._")
             if r.get("contact_email"):
                 st.caption(f"Takk-e-post til: {r.get('contact_email')}")
-            if st.button("Angre / slett besøk", key=f"hdel_{r.get('id')}"):
+            he1, he2 = st.columns(2)
+            if he1.button("Rediger", key=f"hedit_{r.get('id')}", use_container_width=True):
+                edit_visit_dialog(r)
+            if he2.button("Angre / slett besøk", key=f"hdel_{r.get('id')}",
+                          use_container_width=True):
                 try:
                     sb_delete("visits", {"id": f"eq.{r.get('id')}"})
+                    user_co2_totals.clear()
                     st.session_state["_toast"] = "Besøk slettet."
                     st.rerun()
                 except Exception as exc:
