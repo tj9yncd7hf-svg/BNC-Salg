@@ -231,6 +231,8 @@ _SV = {
         "ligger under «Verkstad». Välj även Verkstad för att hitta fler.",
     "Flere valg": "Fler val", "Selskapsform": "Bolagsform",
     "AS + ENK": "AS + ENK", "Kun AS": "Endast AS", "Kun ENK": "Endast ENK",
+    "AB + enskild firma": "AB + enskild firma", "Kun AB": "Endast AB",
+    "Kun enskild firma": "Endast enskild firma", "F.eks.": "T.ex.",
     "Maks avstand mellom besøk (km, uten destinasjon)": "Max avstånd mellan besök (km, utan destination)",
     "Maks omvei fra ruta (km)": "Max omväg från rutten (km)",
     "Lag ruteforslag": "Skapa ruttförslag",
@@ -815,12 +817,26 @@ def _merge_ditec(comps):
     return comps
 
 
+def se_orgform(c):
+    """Selskapsform for en svensk bedrift, utledet fra organisationsnummeret:
+    «16» + 5… = Aktiebolag (AB), personnummer «19…»/«20…» = enskild firma (ENK).
+    Resten (dödsbon, handelsbolag, ek. föreningar …) gir «» (ingen form)."""
+    p = str(c.get("parent_orgnr") or "")
+    if p[:2] in ("19", "20"):
+        return "ENK"
+    if p.startswith("16") and p[2:3] == "5":
+        return "AB"
+    return ""
+
+
 @st.cache_data(ttl=21600, show_spinner=False)
 def companies_for(land):
     """Bedriftslista for landet, med live Ditec-sentre flettet inn for Sverige.
     Mellomlagret, så fletting/henting gjøres ikke på hver rerun."""
     comps = [dict(c) for c in load_companies(land)]
     if land == "SE":
+        for c in comps:
+            c["orgform"] = se_orgform(c)   # AB / ENK (for selskapsform-filteret)
         comps = _merge_ditec(comps)
     return comps
 
@@ -840,6 +856,12 @@ def all_companies():
 
 def current_land():
     return st.session_state.get("land", "NO")
+
+
+def eks(no_city, se_city):
+    """Eksempel-plassholder som følger søkeområdet (land), med språk-riktig «F.eks./T.ex.»."""
+    city = se_city if current_land() == "SE" else no_city
+    return f"{t('F.eks.')} {city}"
 
 
 def land_picker(widget_key, **kw):
@@ -1549,12 +1571,13 @@ def _plan_pool(valgte, orgvalg, skip_dates):
     planlagt på andre dager, og riktig selskapsform."""
     skip = (recently_visited(email) | excluded_orgnr(email)
             | planned_orgnr(email, skip_dates=skip_dates))
-    off = {"Kun AS": "AS", "Kun ENK": "ENK"}.get(orgvalg)
+    off = {"Kun AS": "AS", "Kun ENK": "ENK", "Kun AB": "AB",
+           "Kun enskild firma": "ENK"}.get(orgvalg)
     want_ditec = "Ditec" in valgte   # «Ditec» er et eget filter på tvers av kategorier
     return [c for c in companies
             if (c.get("kategori") in valgte or (want_ditec and c.get("ditec")))
             and str(c.get("orgnr")) not in skip
-            and (off is None or c.get("orgform") == off)]
+            and (off is None or c.get("ditec") or c.get("orgform") == off)]
 
 
 def save_plans(plans):
@@ -1574,6 +1597,7 @@ def plan_area(days, start_txt, hours, visit_min, valgte, orgvalg, maxkm, n_visit
         cands = [c for c in pool if str(c.get("orgnr")) not in used]
         res = routing.plan_route(slat, slon, cands, hours,
                                  visit_minutes=visit_min, max_leg_km=maxkm,
+                                 max_radius_km=maxkm,   # hold forslagene nær basen
                                  max_stops=int(n_visits) if n_visits else 8)
         route = res["route"]
         if n_visits:
@@ -1680,7 +1704,8 @@ def alt_company(meta, current_comps, orgnr):
     if not target or target.get("lat") is None:
         return None
     det = f.get("detour") or 25
-    off = {"Kun AS": "AS", "Kun ENK": "ENK"}.get(f.get("org"))
+    off = {"Kun AS": "AS", "Kun ENK": "ENK", "Kun AB": "AB",
+           "Kun enskild firma": "ENK"}.get(f.get("org"))
     kat = f.get("kat") or _kat_present
     want_ditec = "Ditec" in kat
     skip = (recently_visited(email) | excluded_orgnr(email)
@@ -1691,7 +1716,7 @@ def alt_company(meta, current_comps, orgnr):
         if ((c.get("kategori") not in kat and not (want_ditec and c.get("ditec")))
                 or c.get("lat") is None
                 or str(c.get("orgnr")) in skip
-                or (off is not None and c.get("orgform") != off)):
+                or (off is not None and not c.get("ditec") and c.get("orgform") != off)):
             continue
         d = routing.haversine_km(target["lat"], target["lon"], c["lat"], c["lon"])
         if d < bestd:
@@ -2581,10 +2606,10 @@ if nav == "Planlegging":
 
         st.markdown(t("#### Hvor skal du?"))
         ss["w_start"] = st.text_input(t("Startsted (base / min posisjon)"), value=ss["w_start"],
-                                      placeholder=t("F.eks. Lillehammer"), key="_w_start")
+                                      placeholder=eks("Lillehammer", "Göteborg"), key="_w_start")
         if not multi:
             ss["w_til"] = st.text_input(t("Til · destinasjon (valgfritt)"), value=ss["w_til"],
-                                        placeholder=t("F.eks. Oslo"), key="_w_til",
+                                        placeholder=eks("Oslo", "Malmö"), key="_w_til",
                                         help=t("Fyll ut for drop-in langs veien. "
                                              "Tomt = området rundt startstedet."))
             st.caption(t("Mellomstopp underveis (valgfritt):"))
@@ -2592,7 +2617,7 @@ if nav == "Planlegging":
                 mc1, mc2 = st.columns([6, 1])
                 ss["w_vias"][i] = mc1.text_input(f"Mellomstopp {i + 1}", value=ss["w_vias"][i],
                                                  key=f"_w_via_{i}", label_visibility="collapsed",
-                                                 placeholder=t("F.eks. Gjøvik"))
+                                                 placeholder=eks("Gjøvik", "Jönköping"))
                 if mc2.button(t("✕"), key=f"w_via_del_{i}", use_container_width=True):
                     ss["w_vias"].pop(i)
                     st.rerun()
@@ -2610,7 +2635,7 @@ if nav == "Planlegging":
             if ss["w_trip_mode"] == "base":
                 ss["w_base"] = st.text_input(t("Reisemål · der du jobber flere dager"),
                                              value=ss["w_base"], key="_w_base",
-                                             placeholder=t("F.eks. Trondheim"))
+                                             placeholder=eks("Trondheim", "Stockholm"))
                 _b = (ss["w_base"] or "").strip()
                 if _b:
                     st.caption(t("Dag 1 er reisedagen") + f" {ss['w_start'] or 'start'} → {_b} "
@@ -2632,7 +2657,7 @@ if nav == "Planlegging":
                                 f"<span class='bnc-sub'>— {t('fra')} {prev}</span>", unsafe_allow_html=True)
                     ss["w_legs"][i] = st.text_input(t("Til / overnatting dag") + f" {i + 1}",
                                                     value=ss["w_legs"][i], key=f"_w_leg_{i}",
-                                                    placeholder=t("F.eks. Oslo"),
+                                                    placeholder=eks("Oslo", "Malmö"),
                                                     label_visibility="collapsed")
                     nxt = (ss["w_legs"][i] or "").strip()
                     prev = nxt if nxt else t("(samme sted)")
@@ -2697,14 +2722,13 @@ if nav == "Planlegging":
                            "bilpleie, så flere bilpleie-/biltvätt-bedrifter ligger under "
                            "«Verksted». Velg også Verksted for å finne flere."))
         with st.expander(t("Flere valg")):
-            if current_land() == "NO":
-                _orgs = ["AS + ENK", "Kun AS", "Kun ENK"]
-                ss["w_org"] = st.selectbox(t("Selskapsform"), _orgs, format_func=t,
-                                           index=_orgs.index(ss["w_org"]) if ss["w_org"] in _orgs else 0,
-                                           key="_w_org")
+            if current_land() == "SE":
+                _orgs = ["AB + enskild firma", "Kun AB", "Kun enskild firma"]
             else:
-                # Svenske data har ikke AS/ENK slik norske har – ikke filtrer på selskapsform.
-                ss["w_org"] = "AS + ENK"
+                _orgs = ["AS + ENK", "Kun AS", "Kun ENK"]
+            ss["w_org"] = st.selectbox(t("Selskapsform"), _orgs, format_func=t,
+                                       index=_orgs.index(ss["w_org"]) if ss["w_org"] in _orgs else 0,
+                                       key="_w_org")
             ss["w_max"] = st.slider(t("Maks avstand mellom besøk (km, uten destinasjon)"), 10, 300,
                                     int(ss["w_max"]), 10, key="_w_max")
             ss["w_det"] = st.slider(t("Maks omvei fra ruta (km)"), 2, 60,

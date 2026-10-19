@@ -28,12 +28,16 @@ def travel_minutes(km, speed_kmh=DEFAULT_SPEED_KMH, detour=DEFAULT_DETOUR):
 
 def plan_route(start_lat, start_lon, candidates, hours_available,
                visit_minutes=60.0, speed_kmh=DEFAULT_SPEED_KMH, detour=DEFAULT_DETOUR,
-               max_leg_km=None, return_to_start=False, max_stops=None):
+               max_leg_km=None, return_to_start=False, max_stops=None, max_radius_km=None):
     """Foreslå en besøksrute (grådig nærmeste nabo).
 
     Styres av `max_stops` (antall besøk) når den er satt – da ignoreres tidsbudsjettet,
     slik at «antall besøk» bestemmer (Kim tar de han rekker). Er `max_stops` None, brukes
     tidsbudsjettet `hours_available` som før.
+
+    `max_radius_km` begrenser forslagene til en radius fra STARTEN (for base/område-søk,
+    så en rute rundt basen ikke kjeder seg langt av gårde). `max_leg_km` begrenser
+    avstanden mellom to påfølgende besøk.
 
     candidates: liste av dict med minst 'lat' og 'lon' (og gjerne 'orgnr','navn').
     Returnerer dict: route, total_min, total_km, skipped, n_candidates.
@@ -41,6 +45,10 @@ def plan_route(start_lat, start_lon, candidates, hours_available,
     budget = float(hours_available) * 60.0
     pool = [c for c in candidates
             if c.get("lat") is not None and c.get("lon") is not None]
+    if max_radius_km:
+        pool = [c for c in pool
+                if haversine_km(float(start_lat), float(start_lon),
+                                float(c["lat"]), float(c["lon"])) <= max_radius_km]
     cur_lat, cur_lon = float(start_lat), float(start_lon)
     used_min = 0.0
     total_km = 0.0
