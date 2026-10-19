@@ -754,30 +754,18 @@ def fetch_ditec_centers():
 
 
 def _merge_ditec(comps):
-    """Merk nærmeste SCB-bedrift (innen 60 m) med «(Ditec)», eller legg til senteret
-    som egen post hvis det ikke finnes i SCB. Koordinatene kommer fra CMS-et."""
-    centers = fetch_ditec_centers()
-    for ct in centers:
-        best, bestd = None, 1e9
-        for c in comps:
-            if c.get("lat") is None:
-                continue
-            d = routing.haversine_km(ct["lat"], ct["lon"], c["lat"], c["lon"])
-            if d < bestd:
-                bestd, best = d, c
-        if best and bestd <= 0.06:   # ≤60 m – samme sted, dette er driftsselskapet
-            if "(Ditec)" not in best["navn"]:
-                best["navn"] = best["navn"].rstrip() + " (Ditec)"
-            best["ditec"] = True
-        else:
-            comps.append({"orgnr": "ditec-" + str(ct["slug"]), "parent_orgnr": "",
-                          "navn": ct["name"], "orgform": "", "bransje_kode": "",
-                          "bransje": "Ditec-senter", "kategori": "Bilpleie",
-                          "adresse": ct["adresse"], "postnr": ct["postnr"],
-                          "poststed": ct["poststed"], "kommune": "",
-                          "lat": ct["lat"], "lon": ct["lon"], "geo_nivaa": "ditec-cms",
-                          "epost": ct["epost"], "mobil": ct["mobil"], "nettside": "",
-                          "ansatte": None, "aktivitet": "", "ditec": True})
+    """Legg de aktive Ditec-sentrene (fra CMS) inn som egne poster («Ditec <sted>»).
+    Vi stoler kun på CMS-et – ingen SCB-bedrift merkes «(Ditec)» ut fra nærhet, for
+    det ga falske treff på naboer (f.eks. et verksted i samme bygg) som ikke er Ditec."""
+    for ct in fetch_ditec_centers():
+        comps.append({"orgnr": "ditec-" + str(ct["slug"]), "parent_orgnr": "",
+                      "navn": ct["name"], "orgform": "", "bransje_kode": "",
+                      "bransje": "Ditec-senter", "kategori": "Bilpleie",
+                      "adresse": ct["adresse"], "postnr": ct["postnr"],
+                      "poststed": ct["poststed"], "kommune": "",
+                      "lat": ct["lat"], "lon": ct["lon"], "geo_nivaa": "ditec-cms",
+                      "epost": ct["epost"], "mobil": ct["mobil"], "nettside": "",
+                      "ansatte": None, "aktivitet": "", "ditec": True})
     return comps
 
 
