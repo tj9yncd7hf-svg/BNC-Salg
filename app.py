@@ -189,12 +189,12 @@ _SV = {
     "Neste: område  →": "Nästa: område  →", "Endre": "Ändra", "hverdager": "vardagar",
     "#### Hvor skal du?": "#### Vart ska du?",
     "Startsted (base / min posisjon)": "Startplats (bas / min position)",
-    "F.eks. Lillehammer": "T.ex. Lillehammer", "Til · destinasjon (valgfritt)": "Till · destination (valfritt)",
-    "F.eks. Oslo": "T.ex. Oslo",
+    "F.eks. Lillehammer": "T.ex. Göteborg", "Til · destinasjon (valgfritt)": "Till · destination (valfritt)",
+    "F.eks. Oslo": "T.ex. Malmö",
     "Fyll ut for drop-in langs veien. Tomt = området rundt startstedet.":
         "Fyll i för drop-in längs vägen. Tomt = området runt startplatsen.",
     "Mellomstopp underveis (valgfritt):": "Mellanstopp längs vägen (valfritt):",
-    "F.eks. Gjøvik": "T.ex. Gjøvik", "Legg til mellomstopp": "Lägg till mellanstopp",
+    "F.eks. Gjøvik": "T.ex. Jönköping", "Legg til mellomstopp": "Lägg till mellanstopp",
     "Tur-retur – hjem igjen til start samme dag": "Tur och retur – hem igen till start samma dag",
     "Med destinasjon foreslås drop-in langs veien (og hjemveien ved tur-retur). Uten destinasjon "
     "foreslås drop-in rundt startstedet.":
@@ -204,7 +204,7 @@ _SV = {
     "Fast base (jobbe flere dager samme sted)": "Fast bas (jobba flera dagar på samma plats)",
     "Rundreise (nytt sted hver dag)": "Rundresa (ny plats varje dag)",
     "Reisemål · der du jobber flere dager": "Resmål · där du jobbar flera dagar",
-    "F.eks. Trondheim": "T.ex. Trondheim",
+    "F.eks. Trondheim": "T.ex. Stockholm",
     "Dag 1 er reisedagen": "Dag 1 är resedagen",
     "med bedrifter på veien. De øvrige dagene foreslås bedrifter rundt":
         "med företag längs vägen. Övriga dagar föreslås företag runt",
@@ -321,6 +321,17 @@ _SV = {
         "Lägger en test i kö som skickas av E-postjobbet (kör det i GitHub Actions eller vänta upp till 1 timme).",
     "Send test til": "Skicka test till", "Type": "Typ", "Forhåndsvisning:": "Förhandsvisning:",
     "Legg testmail i kø": "Lägg testmejl i kö",
+    "Språk for malene": "Språk för mallarna",
+    "Svenske e-poster sendes fra info@bncnordic.se via den svenske Brevo-kontoen.":
+        "Svenska e-postmeddelanden skickas från info@bncnordic.se via det svenska Brevo-kontot.",
+    "Takk for praten (til kunden, 2 virkedager etter besøk)":
+        "Tack för pratstunden (till kunden, 2 arbetsdagar efter besök)",
+    "Ukesoppsummering (til selger, fredager)": "Veckosammanfattning (till säljare, fredagar)",
+    "Besøksrapport (til backoffice, samme dag)": "Besöksrapport (till backoffice, samma dag)",
+    # Brukere – språkvalg
+    "Språk (e-post + app)": "Språk (e-post + app)",
+    "Selgerens språk styrer appen og språket/avsenderen på utgående e-post.":
+        "Säljarens språk styr appen och språket/avsändaren på utgående e-post.",
     # feil / toast
     "Kunne ikke lagre:": "Kunde inte spara:", "Kunne ikke hente:": "Kunde inte hämta:",
     "Kunne ikke hente brukere:": "Kunde inte hämta användare:", "Kunne ikke legge i kø:": "Kunde inte lägga i kö:",
@@ -400,6 +411,63 @@ DEFAULT_CONTENT = {
         "label": "Besøksrapport (til backoffice, samme dag)",
     },
 }
+
+# Svenske standardmaler. Samme variabel-navn ({navn}, {antall} …) som de norske,
+# så utfyllingen fungerer likt. Admin kan overstyre dem pr. språk i E-postinnhold.
+DEFAULT_CONTENT_SV = {
+    "thankyou": {
+        "subject": "Tack för pratstunden – BNC Nordic",
+        "body": (
+            "Hej,\n\n"
+            "Tack för att du tog dig tid till en trevlig pratstund när jag var förbi hos er! \n\n"
+            "Vi på BNC Nordic levererar produkter inom bilvård, fälgar, underrede och bromsar, "
+            "och hjälper gärna till att hitta produkter som passar era behov.\n\n"
+            "Har du frågor efter besöket, vill ha mer information eller en offert, är "
+            "det bara att svara på detta mejl eller ringa mig på {telefon}.\n\n"
+            "Trevligt att lära känna er – vi håller kontakten!\n\n"
+            "{navn}\n"
+            "Produktansvarig / Product manager\n\n"
+            "BNC Nordic Distribution AS\n"
+            "{telefon}\n"
+            "{epost}\n"
+            "Strömsveien 323B, 1081 Oslo"
+        ),
+    },
+    "summary": {
+        "subject": "Veckosammanfattning: {antall} besök ({periode})",
+        "body": (
+            "Hej,\n\n"
+            "Här är sammanfattningen av veckan ({periode}):\n\n"
+            "Totalt {antall} besök.\n"
+            "Utfall: {utfall}\n"
+            "Kört denna vecka: {total_km} km (~{total_co2} kg CO₂e)\n\n"
+            "Besök:\n{besok_liste}\n\n"
+            "Kör hårt!\nBNC Nordic"
+        ),
+    },
+    "report": {
+        "subject": "Besöksrapport: {bedrift} ({utfall})",
+        "body": (
+            "Säljare: {selger}\n"
+            "Företag: {bedrift} (org {orgnr})\n"
+            "Adress: {adresse}\n"
+            "Datum: {dato}\n"
+            "Utfall: {utfall}\n"
+            "Körning till besöket: {km} km (~{co2} kg CO₂e)\n\n"
+            "Rapport:\n{rapport}\n"
+        ),
+    },
+}
+
+
+def default_content(kind, lang="no"):
+    base = DEFAULT_CONTENT[kind]
+    if lang == "sv":
+        sv = DEFAULT_CONTENT_SV.get(kind, {})
+        return {"subject": sv.get("subject") or base["subject"],
+                "body": sv.get("body") or base["body"],
+                "vars": base["vars"], "label": base["label"]}
+    return base
 
 
 def co2_factor(settings):
@@ -580,6 +648,30 @@ def sb_insert(table, rows):
                       headers={**_sb_headers(), "Prefer": "return=minimal"},
                       json=rows if isinstance(rows, list) else [rows], timeout=20)
     r.raise_for_status()
+
+
+def enqueue_email(row):
+    """Legg en e-post i køen. Tåler at «lang»-kolonnen ikke er lagt inn ennå –
+    prøver da på nytt uten den, så besøksregistrering aldri feiler av den grunn."""
+    try:
+        sb_insert("email_queue", row)
+    except Exception:
+        if "lang" in row:
+            row = {k: v for k, v in row.items() if k != "lang"}
+            sb_insert("email_queue", row)
+        else:
+            raise
+
+
+def upsert_settings(row):
+    """Lagre selgerprofil. Tåler at «lang»-kolonnen ikke finnes ennå."""
+    try:
+        sb_upsert("salesperson_settings", row, "email")
+    except Exception:
+        if "lang" in row:
+            sb_upsert("salesperson_settings", {k: v for k, v in row.items() if k != "lang"}, "email")
+        else:
+            raise
 
 
 def sb_upsert(table, row, on_conflict):
@@ -970,15 +1062,24 @@ def load_settings(email):
         return {}
 
 
-def get_content(kind):
-    d = DEFAULT_CONTENT[kind]
+def get_content(kind, lang="no"):
+    """Admin-redigert e-postinnhold for (kind, språk). Faller tilbake til innebygd
+    standardtekst. Tåler at «lang»-kolonnen ikke er lagt inn ennå (leser da den
+    gamle raden pr. kind for norsk)."""
+    d = default_content(kind, lang)
+    rows = None
     try:
-        rows = sb_get("email_content", "kind,subject,body", {"kind": f"eq.{kind}"})
-        if rows:
-            return {"subject": rows[0].get("subject") or d["subject"],
-                    "body": rows[0].get("body") or d["body"]}
+        rows = sb_get("email_content", "subject,body", {"kind": f"eq.{kind}", "lang": f"eq.{lang}"})
     except Exception:
-        pass
+        rows = None
+    if rows is None and lang == "no":
+        try:
+            rows = sb_get("email_content", "subject,body", {"kind": f"eq.{kind}"})
+        except Exception:
+            rows = []
+    if rows:
+        return {"subject": rows[0].get("subject") or d["subject"],
+                "body": rows[0].get("body") or d["body"]}
     return {"subject": d["subject"], "body": d["body"]}
 
 
@@ -1606,22 +1707,23 @@ def register_dialog(company):
                 "report": report, "outcome": outcome, "contact_email": contact,
                 "leg_km": leg_km, "co2_g": co2g,
             })
-            rc = get_content("report")
+            _mlang = current_lang()   # selgerens språk styrer e-post + avsender
+            rc = get_content("report", _mlang)
             rmap = {"selger": email, "bedrift": company.get("navn", ""),
                     "orgnr": company.get("orgnr", ""),
                     "adresse": f"{company.get('adresse','')}, {company.get('postnr','')} {company.get('poststed','')}",
                     "dato": today.isoformat(), "utfall": outcome, "rapport": report,
                     "km": leg_km, "co2": co2_kg(leg_km, _settings)}
-            sb_insert("email_queue", {
-                "kind": "report", "to_email": BACKOFFICE_EMAIL,
+            enqueue_email({
+                "kind": "report", "to_email": BACKOFFICE_EMAIL, "lang": _mlang,
                 "subject": apply_vars(rc["subject"], rmap),
                 "body": apply_vars(rc["body"], rmap),
                 "send_after": today.isoformat(),
                 "payload": {"orgnr": str(company.get("orgnr")), "user": email}})
             if send_thanks and contact:
-                tc = get_content("thankyou")
-                sb_insert("email_queue", {
-                    "kind": "thankyou", "to_email": contact,
+                tc = get_content("thankyou", _mlang)
+                enqueue_email({
+                    "kind": "thankyou", "to_email": contact, "lang": _mlang,
                     "subject": fill_thanks(tc["subject"], _settings, email),
                     "body": fill_thanks(tc["body"], _settings, email),
                     "send_after": add_business_days(today, 2).isoformat(),
@@ -2815,6 +2917,9 @@ if nav == "Innstillinger":
         lat, lon, label = (_settings.get("start_lat"), _settings.get("start_lon"), start_label)
         if start_label:
             _la, _lo, _lb = geocode(start_label)
+            if not _la:
+                # Basen kan ligge i et annet land enn søkeområdet – prøv det andre også.
+                _la, _lo, _lb = geocode(start_label, "NO" if current_land() == "SE" else "SE")
             if _la:
                 lat, lon, label = _la, _lo, _lb
         try:
@@ -2924,25 +3029,32 @@ if nav == "Brukere" and is_admin:
             with st.form("ny_bruker"):
                 bn = st.text_input(t("Navn"), placeholder=t("Kim Werner Strand"))
                 be = st.text_input(t("E-post"), placeholder=t("kim@bncnordic.no")).strip().lower()
+                bl = st.radio(t("Språk (e-post + app)"), ["no", "sv"], horizontal=True, key="nb_lang",
+                              format_func=lambda x: {"no": "Norsk", "sv": "Svenska"}[x])
+                st.caption(t("Selgerens språk styrer appen og språket/avsenderen på utgående e-post."))
                 if st.form_submit_button(t("Opprett / ny lenke"), type="primary", use_container_width=True):
                     if be:
                         try:
-                            sb_upsert("salesperson_settings", {
-                                "email": be, "name": bn, "login_token": _secrets.token_urlsafe(12),
-                                "updated_at": datetime.now(timezone.utc).isoformat()}, "email")
+                            upsert_settings({
+                                "email": be, "name": bn, "lang": bl,
+                                "login_token": _secrets.token_urlsafe(12),
+                                "updated_at": datetime.now(timezone.utc).isoformat()})
                             st.success(t("Bruker klar – lenken vises til høyre."))
                         except Exception as exc:
                             st.error(t("Kunne ikke lagre:") + f" {exc}")
                     else:
-                        st.error("Skriv inn e-post.")
+                        st.error(t("Skriv inn e-post."))
     with c2:
         if not APP_BASE_URL:
             st.warning(t("Legg **APP_BASE_URL** i Streamlit Secrets (appens adresse) for komplette lenker."))
         try:
-            users = sb_get("salesperson_settings", "email,name,login_token", {"order": "email.asc"})
-        except Exception as exc:
-            users = []
-            st.error(t("Kunne ikke hente brukere:") + f" {exc}")
+            users = sb_get("salesperson_settings", "email,name,login_token,lang", {"order": "email.asc"})
+        except Exception:
+            try:
+                users = sb_get("salesperson_settings", "email,name,login_token", {"order": "email.asc"})
+            except Exception as exc:
+                users = []
+                st.error(t("Kunne ikke hente brukere:") + f" {exc}")
         for u in users:
             with st.container(border=True):
                 tag = " · admin" if u["email"] in ADMIN_EMAILS else ""
@@ -2952,6 +3064,17 @@ if nav == "Brukere" and is_admin:
                     st.code(link, language=None)
                 else:
                     st.caption(t("Ingen lenke ennå – trykk «Ny lenke»."))
+                _uc = "sv" if (u.get("lang") or "no") == "sv" else "no"
+                _us = st.radio(t("Språk (e-post + app)"), ["no", "sv"],
+                               index=1 if _uc == "sv" else 0, key=f"ul_{u['email']}",
+                               horizontal=True, format_func=lambda x: {"no": "Norsk", "sv": "Svenska"}[x])
+                if _us != _uc:
+                    try:
+                        upsert_settings({"email": u["email"], "lang": _us,
+                                         "updated_at": datetime.now(timezone.utc).isoformat()})
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(t("Kunne ikke lagre:") + f" {exc}")
                 bc = st.columns(2)
                 if bc[0].button(t("Ny lenke"), key=f"nl_{u['email']}", use_container_width=True):
                     try:
@@ -2975,19 +3098,24 @@ if nav == "Brukere" and is_admin:
 # ========================================================= E-POSTINNHOLD =======
 if nav == "E-postinnhold" and is_admin:
     page_header(t("E-postinnhold"), t("Rediger de automatiske e-postene. Selgerne ser ikke denne siden."))
+    _ec_langs = ["no", "sv"]
+    ec_lang = st.radio(t("Språk for malene"), _ec_langs, horizontal=True, key="ec_lang",
+                       format_func=lambda x: {"no": "Norsk", "sv": "Svenska"}[x])
+    if ec_lang == "sv":
+        st.caption(t("Svenske e-poster sendes fra info@bncnordic.se via den svenske Brevo-kontoen."))
     for kind in ("thankyou", "summary", "report"):
-        d = DEFAULT_CONTENT[kind]
-        cur = get_content(kind)
-        with st.expander(d["label"], expanded=(kind == "thankyou")):
-            with st.form(f"ec_{kind}"):
+        d = default_content(kind, ec_lang)
+        cur = get_content(kind, ec_lang)
+        with st.expander(t(d["label"]), expanded=(kind == "thankyou")):
+            with st.form(f"ec_{kind}_{ec_lang}"):
                 subj = st.text_input(t("Emne"), value=cur["subject"])
                 body = st.text_area(t("Tekst"), value=cur["body"], height=260)
-                st.caption(f"Variabler som fylles automatisk: {d['vars']}")
+                st.caption(t("Variabler som fylles automatisk:") + f" {d['vars']}")
                 if st.form_submit_button(t("Lagre"), type="primary"):
                     try:
                         sb_upsert("email_content", {
-                            "kind": kind, "subject": subj, "body": body,
-                            "updated_at": datetime.now(timezone.utc).isoformat()}, "kind")
+                            "kind": kind, "lang": ec_lang, "subject": subj, "body": body,
+                            "updated_at": datetime.now(timezone.utc).isoformat()}, "kind,lang")
                         st.success(t("Lagret."))
                     except Exception as exc:
                         st.error(t("Kunne ikke lagre:") + f" {exc}")
@@ -2998,8 +3126,8 @@ if nav == "E-postinnhold" and is_admin:
                    "eller vent inntil 1 time)."))
         tt_to = st.text_input(t("Send test til"), value=email, key="tt_to")
         tt_kind = st.selectbox(t("Type"), ["thankyou", "summary", "report"],
-                               format_func=lambda k: DEFAULT_CONTENT[k]["label"], key="tt_kind")
-        cur = get_content(tt_kind)
+                               format_func=lambda k: t(default_content(k, ec_lang)["label"]), key="tt_kind")
+        cur = get_content(tt_kind, ec_lang)
         if tt_kind == "thankyou":
             tsub = fill_thanks(cur["subject"], _settings, email)
             tbody = fill_thanks(cur["body"], _settings, email)
@@ -3021,8 +3149,8 @@ if nav == "E-postinnhold" and is_admin:
         st.text(tbody)
         if st.button(t("Legg testmail i kø")):
             try:
-                sb_insert("email_queue", {
-                    "kind": tt_kind, "to_email": tt_to.strip(),
+                enqueue_email({
+                    "kind": tt_kind, "to_email": tt_to.strip(), "lang": ec_lang,
                     "subject": "[TEST] " + tsub, "body": tbody,
                     "send_after": date.today().isoformat(), "payload": {"test": True}})
                 st.success(t("Testmail lagt i kø til") + f" {tt_to.strip()}. "
