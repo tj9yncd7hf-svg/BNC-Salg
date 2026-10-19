@@ -275,6 +275,8 @@ _SV = {
     "Velg hvilket land bedriftssøk og ruteplanlegging bruker.":
         "Välj vilket land företagssök och ruttplanering använder.",
     "**Selgerprofil**": "**Säljarprofil**", "Navn": "Namn", "Telefon": "Telefon", "+47 …": "+46 …",
+    "Tittel / stilling": "Titel / befattning", "F.eks. Produktansvarlig": "T.ex. Produktansvarig",
+    "Settes automatisk inn i takk-e-posten ({tittel}).": "Sätts automatiskt in i tack-e-posten ({tittel}).",
     "Settes automatisk inn i takk-e-posten ({telefon}).": "Sätts automatiskt in i tack-e-posten ({telefon}).",
     "E-post for ukesoppsummering": "E-post för veckosammanfattning",
     "Hit sendes fredagens ukesoppsummering.": "Hit skickas fredagens veckosammanfattning.",
@@ -373,13 +375,13 @@ DEFAULT_CONTENT = {
             "det bare å svare på denne e-posten eller ringe meg på {telefon}.\n\n"
             "Hyggelig å bli kjent – vi holder kontakten!\n\n"
             "{navn}\n"
-            "Produktansvarlig / Product manager\n\n"
+            "{tittel}\n\n"
             "BNC Nordic Distribution AS\n"
             "{telefon}\n"
             "{epost}\n"
             "Strømsveien 323B, 1081 Oslo"
         ),
-        "vars": "{navn}, {telefon}, {epost}",
+        "vars": "{navn}, {tittel}, {telefon}, {epost}",
         "label": "Takk for praten (til kunden, 2 virkedager etter besøk)",
     },
     "summary": {
@@ -426,11 +428,10 @@ DEFAULT_CONTENT_SV = {
             "det bara att svara på detta mejl eller ringa mig på {telefon}.\n\n"
             "Trevligt att lära känna er – vi håller kontakten!\n\n"
             "{navn}\n"
-            "Produktansvarig / Product manager\n\n"
-            "BNC Nordic Distribution AS\n"
+            "{tittel}\n\n"
+            "BNC Nordic Distribution AB\n"
             "{telefon}\n"
-            "{epost}\n"
-            "Strömsveien 323B, 1081 Oslo"
+            "{epost}"
         ),
     },
     "summary": {
@@ -495,6 +496,7 @@ def apply_vars(text, mapping):
 def fill_thanks(text, settings, login_email):
     return apply_vars(text, {
         "navn": str(settings.get("name") or "").strip() or "Kim Werner Strand",
+        "tittel": str(settings.get("title") or "").strip(),
         "telefon": str(settings.get("phone") or "").strip(),
         "epost": str(login_email or "").strip(),
     })
@@ -664,12 +666,14 @@ def enqueue_email(row):
 
 
 def upsert_settings(row):
-    """Lagre selgerprofil. Tåler at «lang»-kolonnen ikke finnes ennå."""
+    """Lagre selgerprofil. Tåler at nyere kolonner (lang/title) ikke finnes ennå –
+    prøver da på nytt uten dem."""
     try:
         sb_upsert("salesperson_settings", row, "email")
     except Exception:
-        if "lang" in row:
-            sb_upsert("salesperson_settings", {k: v for k, v in row.items() if k != "lang"}, "email")
+        reduced = {k: v for k, v in row.items() if k not in ("lang", "title")}
+        if reduced != row:
+            sb_upsert("salesperson_settings", reduced, "email")
         else:
             raise
 
@@ -2887,6 +2891,9 @@ if nav == "Innstillinger":
             with st.container(border=True):
                 st.markdown(t("**Selgerprofil**"))
                 name = st.text_input(t("Navn"), value=_settings.get("name", ""))
+                title = st.text_input(t("Tittel / stilling"), value=_settings.get("title", ""),
+                                      placeholder=t("F.eks. Produktansvarlig"),
+                                      help=t("Settes automatisk inn i takk-e-posten ({tittel})."))
                 phone = st.text_input(t("Telefon"), value=_settings.get("phone", ""), placeholder=t("+47 …"),
                                       help=t("Settes automatisk inn i takk-e-posten ({telefon})."))
                 summary_email = st.text_input(t("E-post for ukesoppsummering"),
@@ -2923,14 +2930,14 @@ if nav == "Innstillinger":
             if _la:
                 lat, lon, label = _la, _lo, _lb
         try:
-            sb_upsert("salesperson_settings", {
-                "email": email, "name": name, "phone": phone.strip(),
+            upsert_settings({
+                "email": email, "name": name, "title": title.strip(), "phone": phone.strip(),
                 "summary_email": summary_email.strip().lower(),
                 "start_label": label, "start_lat": lat, "start_lon": lon,
                 "hours_per_day": hours, "avg_visit_minutes": visit_min, "speed_kmh": speed,
                 "co2_g_per_km": co2,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
-            }, "email")
+            })
             st.success(t("Lagret.") + (f" {t('Startposisjon:')} {label}." if lat else
                                        t(" (Fant ikke adressen – startposisjon ikke satt.)")))
         except Exception as exc:
