@@ -56,6 +56,300 @@ KATEGORIER = [
     "Bensinstasjon / drivstoff", "MC-verksted", "MC-forhandler", "MC-utstyr & klær",
 ]
 
+
+# ----------------------------------------------------------- språk (NO/SV) ----
+# Appen er skrevet på norsk. t() oversetter synlige strenger til svensk når selger
+# har valgt det i Innstillinger. Ukjente strenger faller trygt tilbake til norsk.
+def current_lang():
+    v = st.session_state.get("lang")
+    if v in ("no", "sv"):
+        return v
+    try:
+        q = st.query_params.get("lang")
+    except Exception:
+        q = None
+    return q if q in ("no", "sv") else "no"
+
+
+def t(no):
+    if current_lang() == "sv":
+        return _SV.get(no, no)
+    return no
+
+
+class _Loc:
+    """Språkavhengig sekvens (ukedager/måneder): samme indeksering som før, men gir
+    svensk tekst når språket er svensk."""
+    def __init__(self, no, sv):
+        self._no, self._sv = no, sv
+
+    def _cur(self):
+        return self._sv if current_lang() == "sv" else self._no
+
+    def __getitem__(self, i):
+        return self._cur()[i]
+
+    def __len__(self):
+        return len(self._no)
+
+    def __iter__(self):
+        return iter(self._cur())
+
+
+_SV = {
+    # innlogging / landing
+    "Selger på veien": "Säljare på vägen", "Passord": "Lösenord", "Logg inn": "Logga in",
+    "Feil passord.": "Fel lösenord.",
+    "Supabase er ikke konfigurert (SUPABASE_URL / SUPABASE_SECRET_KEY mangler).":
+        "Supabase är inte konfigurerat (SUPABASE_URL / SUPABASE_SECRET_KEY saknas).",
+    "Din e-post": "Din e-post", "Fortsett": "Fortsätt",
+    "Selgere kommer vanligvis inn via sin personlige lenke og slipper dette.":
+        "Säljare kommer vanligtvis in via sin personliga länk och slipper detta.",
+    # meny / navigasjon / sidebar
+    "Meny": "Meny", "Logg ut": "Logga ut",
+    "Min dag": "Min dag", "Drop-in": "Drop-in", "Planlegging": "Planering",
+    "Historikk": "Historik", "Innstillinger": "Inställningar", "Brukere": "Användare",
+    "E-postinnhold": "E-postinnehåll", "Land": "Land",
+    "Klimaavtrykk:": "Klimatavtryck:", "denne mnd": "denna mån", "kg i år": "kg i år",
+    "Data for": "Data för",
+    "er ikke lagt inn ennå – viser Norge.": "är inte inlagt ännu – visar Norge.",
+    "Bedriftslista for": "Företagslistan för",
+    "mangler eller er tom. Bytt søkeområde under Innstillinger.":
+        "saknas eller är tom. Byt sökområde under Inställningar.",
+    # besøksregistrering + utfall
+    "Besøksresultat": "Besöksresultat", "Interessert": "Intresserad", "Vil tenke": "Vill tänka",
+    "Ikke interessert": "Inte intresserad", "Ikke til stede": "Inte på plats",
+    "Solgt": "Sålt", "Annet": "Annat",
+    "Besøksrapport": "Besöksrapport", "Hva skjedde på besøket …": "Vad hände på besöket …",
+    "Kundens e-post": "Kundens e-post",
+    "Send «takk for praten» (går ut 2 virkedager etter)":
+        "Skicka «tack för pratstunden» (skickas 2 arbetsdagar efter)",
+    "Ikke besøk denne kunden igjen": "Besök inte denna kund igen",
+    "Skjuler bedriften permanent fra framtidige forslag. Kan angres under Innstillinger → Ekskluderte bedrifter.":
+        "Döljer företaget permanent från framtida förslag. Kan ångras under Inställningar → Exkluderade företag.",
+    "Lagre besøk og send rapport": "Spara besök och skicka rapport",
+    "Lagre endringer": "Spara ändringar",
+    # kart
+    "Ingen punkter å vise på kart.": "Inga punkter att visa på kartan.",
+    # Min dag
+    "Velg dag": "Välj dag", "besøk": "besök", " — ingen rute": " — ingen rutt",
+    "I dag · ": "Idag · ", "dagens planlagte rute": "dagens planerade rutt",
+    "planlagt rute": "planerad rutt", "i dag": "idag", "denne dagen": "denna dag",
+    "Ingen planlagt rute": "Ingen planerad rutt",
+    "Gå til **Planlegging** for å sette opp ruter – eller bruk **Drop-in** for et besøk på sparket.":
+        "Gå till **Planering** för att sätta upp rutter – eller använd **Drop-in** för ett besök på direkten.",
+    "Besøk i ruta": "Besök i rutten", "Samlet kjøring": "Samlad körning",
+    "Beregnet tid": "Beräknad tid", "Klimaavtrykk": "Klimatavtryck",
+    "Vis kart": "Visa karta", "Slett dagen": "Radera dagen",
+    "Slett hele den planlagte ruta for denne dagen": "Radera hela den planerade rutten för denna dag",
+    "Åpne hele ruta i Google Maps": "Öppna hela rutten i Google Maps",
+    "#### Dagens besøk": "#### Dagens besök", "Angre besøk": "Ångra besök",
+    "Registrer": "Registrera", "Naviger": "Navigera",
+    "Fjern fra ruta (kan dukke opp igjen senere)": "Ta bort från rutten (kan dyka upp igen senare)",
+    "Skjul": "Dölj",
+    "Ikke aktuell – skjul permanent fra framtidige forslag":
+        "Inte aktuell – dölj permanent från framtida förslag",
+    # Drop-in
+    "Søk opp en bedrift og registrer et besøk på sparket":
+        "Sök upp ett företag och registrera ett besök på direkten",
+    "Søk bedrift (navn eller org.nr)": "Sök företag (namn eller org.nr)",
+    "Skriv navn eller org.nr …": "Skriv namn eller org.nr …", "Søk": "Sök",
+    "Ingen treff. Prøv færre ord, eller søk på org./bedr.nr.":
+        "Inga träffar. Prova färre ord, eller sök på org./företagsnr.",
+    "Søk opp en bedrift for å registrere et drop-in-besøk.":
+        "Sök upp ett företag för att registrera ett drop-in-besök.",
+    # Planlegging
+    "Planlegg besøk": "Planera besök", "Finn kundebesøk langs ruta di.": "Hitta kundbesök längs din rutt.",
+    "#### Forslag til rute – godkjenn for å legge i Min dag":
+        "#### Förslag till rutt – godkänn för att lägga i Min dag",
+    "Obs om adressene: Vi bruker den adressen som er registrert i Brønnøysund for Norge, for Sverige: "
+    "SCB (Statistiska centralbyrån). Den er ikke alltid den samme som der bedriften faktisk holder til. "
+    "Sjekk «Nettside» eller «Google» før du drar hvis noe ser rart ut.":
+        "Obs om adresserna: Vi använder adressen som är registrerad i Brønnøysund för Norge, för Sverige: "
+        "SCB (Statistiska centralbyrån). Den är inte alltid densamma som där företaget faktiskt håller till. "
+        "Kolla «Webbplats» eller «Google» innan du åker om något ser konstigt ut.",
+    "Vis hele ruta i kartet": "Visa hela rutten på kartan",
+    "Ingen forslag igjen for denne dagen.": "Inga förslag kvar för denna dag.",
+    "Zoom til denne bedriften i kartet": "Zooma till detta företag på kartan",
+    "Nettside": "Webbplats", "Åpne bedriftens nettside i ny fane": "Öppna företagets webbplats i ny flik",
+    "Google": "Google", "Google-søk på bedriften i ny fane": "Google-sökning på företaget i ny flik",
+    "Bytt": "Byt", "Finn en annen bedrift i nærheten i stedet": "Hitta ett annat företag i närheten istället",
+    "Fant ingen annen aktuell bedrift i nærheten.": "Hittade inget annat aktuellt företag i närheten.",
+    "Fjern dette forslaget": "Ta bort detta förslag",
+    "Fjern forslag du ikke vil ha med «✕», eller bytt det ut med en annen bedrift i nærheten med «Bytt». "
+    "Ingenting lagres før du godkjenner.":
+        "Ta bort förslag du inte vill ha med «✕», eller byt ut det mot ett annat företag i närheten med "
+        "«Byt». Ingenting sparas förrän du godkänner.",
+    "Godkjenn og legg i Min dag": "Godkänn och lägg i Min dag", "Forkast": "Förkasta",
+    "#### Når skal du reise?": "#### När ska du resa?",
+    "Velg en startdato i kalenderen.": "Välj ett startdatum i kalendern.",
+    "Velg sluttdato … (eller klikk samme dag igjen for én dag)":
+        "Välj slutdatum … (eller klicka samma dag igen för en dag)",
+    "Én dag valgt.": "En dag vald.", "dager valgt.": "dagar valda.",
+    "Neste: område  →": "Nästa: område  →", "Endre": "Ändra", "hverdager": "vardagar",
+    "#### Hvor skal du?": "#### Vart ska du?",
+    "Startsted (base / min posisjon)": "Startplats (bas / min position)",
+    "F.eks. Lillehammer": "T.ex. Lillehammer", "Til · destinasjon (valgfritt)": "Till · destination (valfritt)",
+    "F.eks. Oslo": "T.ex. Oslo",
+    "Fyll ut for drop-in langs veien. Tomt = området rundt startstedet.":
+        "Fyll i för drop-in längs vägen. Tomt = området runt startplatsen.",
+    "Mellomstopp underveis (valgfritt):": "Mellanstopp längs vägen (valfritt):",
+    "F.eks. Gjøvik": "T.ex. Gjøvik", "Legg til mellomstopp": "Lägg till mellanstopp",
+    "Tur-retur – hjem igjen til start samme dag": "Tur och retur – hem igen till start samma dag",
+    "Med destinasjon foreslås drop-in langs veien (og hjemveien ved tur-retur). Uten destinasjon "
+    "foreslås drop-in rundt startstedet.":
+        "Med destination föreslås drop-in längs vägen (och hemvägen vid tur och retur). Utan destination "
+        "föreslås drop-in runt startplatsen.",
+    "Reisemåte": "Resesätt",
+    "Fast base (jobbe flere dager samme sted)": "Fast bas (jobba flera dagar på samma plats)",
+    "Rundreise (nytt sted hver dag)": "Rundresa (ny plats varje dag)",
+    "Reisemål · der du jobber flere dager": "Resmål · där du jobbar flera dagar",
+    "F.eks. Trondheim": "T.ex. Trondheim",
+    "Dag 1 er reisedagen": "Dag 1 är resedagen",
+    "med bedrifter på veien. De øvrige dagene foreslås bedrifter rundt":
+        "med företag längs vägen. Övriga dagar föreslås företag runt",
+    "Du slipper å skrive": "Du slipper skriva", "på hver dag.": "varje dag.",
+    "Skriv reisemålet én gang – det gjelder alle dagene.":
+        "Skriv resmålet en gång – det gäller alla dagarna.",
+    "##### Reiserute – én etappe per dag": "##### Resrutt – en etapp per dag",
+    "Skriv hvor du ender hver dag (overnatting). Neste dag starter der. Siste dag: sett sluttsted, f.eks. hjem.":
+        "Skriv var du slutar varje dag (övernattning). Nästa dag startar där. Sista dagen: sätt slutplats, t.ex. hem.",
+    "Dag": "Dag", "fra": "från", "(samme sted)": "(samma plats)",
+    "Til / overnatting dag": "Till / övernattning dag",
+    "La en dag stå tom hvis du bare vil jobbe området rundt startstedet.":
+        "Lämna en dag tom om du bara vill jobba området runt startplatsen.",
+    "←  Tilbake": "←  Tillbaka", "Neste: besøksvalg  →": "Nästa: besöksval  →",
+    "#### Besøksvalg": "#### Besöksval", "Besøk per dag": "Besök per dag",
+    "Så mange forslag spres langs ruta. Kim tar de han rekker på veien.":
+        "Så många förslag sprids längs rutten. Säljaren tar dem hen hinner med på vägen.",
+    "Minutter per besøk": "Minuter per besök", "Kun for anslått kjøretid.": "Endast för uppskattad körtid.",
+    "Alle bransjer": "Alla branscher", "ingen valgt": "inget valt", "Bransjer:": "Branscher:",
+    "Alle aktuelle bransjer": "Alla aktuella branscher", "…eller velg selv": "…eller välj själv",
+    "Tips: Det svenske registeret (SCB) har ingen egen kode for bilpleie, så flere bilpleie-/biltvätt-bedrifter "
+    "ligger under «Verksted». Velg også Verksted for å finne flere.":
+        "Tips: Det svenska registret (SCB) har ingen egen kod för bilvård, så fler bilvårds-/biltvättföretag "
+        "ligger under «Verkstad». Välj även Verkstad för att hitta fler.",
+    "Flere valg": "Fler val", "Selskapsform": "Bolagsform",
+    "AS + ENK": "AS + ENK", "Kun AS": "Endast AS", "Kun ENK": "Endast ENK",
+    "Maks avstand mellom besøk (km, uten destinasjon)": "Max avstånd mellan besök (km, utan destination)",
+    "Maks omvei fra ruta (km)": "Max omväg från rutten (km)",
+    "Lag ruteforslag": "Skapa ruttförslag",
+    "Velg minst én bransje – eller huk av «Alle aktuelle bransjer».":
+        "Välj minst en bransch – eller bocka i «Alla aktuella branscher».",
+    # bransjer / kategorier
+    "Verksted": "Verkstad", "Bilpleie": "Bilvård", "Bilforhandler": "Bilhandlare",
+    "Delegrossist": "Reservdelsgrossist", "Bildeler & rekvisita (butikk)": "Bildelar & tillbehör (butik)",
+    "Bilgrossist (import/engros)": "Bilgrossist (import/grossist)",
+    "Bensinstasjon / drivstoff": "Bensinstation / drivmedel", "MC-verksted": "MC-verkstad",
+    "MC-forhandler": "MC-handlare", "MC-utstyr & klær": "MC-utrustning & kläder",
+    "Ditec": "Ditec", "Ditec-senter": "Ditec-center",
+    # kommende ruter
+    "#### Kommende ruter": "#### Kommande rutter", "Tøm alle": "Töm alla",
+    "Slett alle kommende planlagte ruter": "Radera alla kommande planerade rutter",
+    "Ingen kommende ruter ennå – planlegg en rute over.": "Inga kommande rutter ännu – planera en rutt ovan.",
+    "Hele turen": "Hela resan", "dager": "dagar", "forslag": "förslag",
+    "Åpne ruta i Google Maps": "Öppna rutten i Google Maps",
+    "Forslag til drop-in (valgfritt) — Bytt = annen bedrift · ✕ fjern fra ruta · Skjul = permanent:":
+        "Förslag till drop-in (valfritt) — Byt = annat företag · ✕ ta bort från rutten · Dölj = permanent:",
+    "kjøring": "körning", "ingen forslag ennå": "inga förslag ännu",
+    "Bytt ut med en annen bedrift i nærheten": "Byt ut mot ett annat företag i närheten",
+    "Fjern fra denne ruta (kan dukke opp igjen senere)": "Ta bort från denna rutt (kan dyka upp igen senare)",
+    "Ikke aktuell – skjul permanent fra alle framtidige forslag":
+        "Inte aktuell – dölj permanent från alla framtida förslag",
+    "Slett ruten": "Radera rutten",
+    # Historikk
+    "Dine besøk og klimaavtrykk": "Dina besök och klimatavtryck", "Periode": "Period",
+    "Denne måneden": "Denna månad", "Hittil i år": "Hittills i år", "Alt": "Allt",
+    "Besøk": "Besök", "Kjørt (km)": "Kört (km)",
+    "Kjøring summeres fra avstanden til hvert registrerte besøk (anslag for konsernrapportering). "
+    "Besøk søkt opp manuelt teller 0 km.":
+        "Körning summeras från avståndet till varje registrerat besök (uppskattning för koncernrapportering). "
+        "Besök som sökts upp manuellt räknas som 0 km.",
+    "_Ingen rapporttekst._": "_Ingen rapporttext._", "Takk-e-post til:": "Tack-e-post till:",
+    "Rediger": "Redigera", "Angre / slett besøk": "Ångra / radera besök",
+    "Ingen besøk i perioden": "Inga besök i perioden",
+    # Innstillinger
+    "Profil og standardverdier for planlegging": "Profil och standardvärden för planering",
+    "**Søkeområde**": "**Sökområde**", "Språk": "Språk",
+    "bedrifter i": "företag i",
+    "Velg hvilket land bedriftssøk og ruteplanlegging bruker.":
+        "Välj vilket land företagssök och ruttplanering använder.",
+    "**Selgerprofil**": "**Säljarprofil**", "Navn": "Namn", "Telefon": "Telefon", "+47 …": "+46 …",
+    "Settes automatisk inn i takk-e-posten ({telefon}).": "Sätts automatiskt in i tack-e-posten ({telefon}).",
+    "E-post for ukesoppsummering": "E-post för veckosammanfattning",
+    "Hit sendes fredagens ukesoppsummering.": "Hit skickas fredagens veckosammanfattning.",
+    "**Standard for planlegging**": "**Standard för planering**",
+    "Fast startposisjon (adresse)": "Fast startposition (adress)",
+    "Valgfritt – kan overstyres på «Min dag»": "Valfritt – kan överstyras på «Min dag»",
+    "Snitt pr. besøk (min)": "Snitt per besök (min)",
+    "Standardverdi i planleggingen og for «Beregnet tid»-anslaget.":
+        "Standardvärde i planeringen och för «Beräknad tid»-uppskattningen.",
+    "Snittfart bil (km/t)": "Snitthastighet bil (km/h)", "Brukes til å anslå kjøretid.": "Används för att uppskatta körtid.",
+    "Utslipp (g CO₂e/km)": "Utsläpp (g CO₂e/km)",
+    "For konsernrapportering. Helelektrisk (f.eks. BMW iX1) = 0. Ladbar hybrid ~60, bensin ~165, diesel ~170.":
+        "För koncernrapportering. Helelektrisk (t.ex. BMW iX1) = 0. Laddhybrid ~60, bensin ~165, diesel ~170.",
+    "Lagre innstillinger": "Spara inställningar", "Lagret.": "Sparat.",
+    "Ekskluderte bedrifter (skjult fra forslag)": "Exkluderade företag (dolda från förslag)",
+    "Ingen bedrifter er ekskludert.": "Inga företag är exkluderade.", "Angre alle": "Ångra alla",
+    "Fjern alle fra ekskludert-lista – de kan foreslås igjen":
+        "Ta bort alla från exkluderingslistan – de kan föreslås igen",
+    "Angre": "Ångra",
+    "Du kommer inn via din personlige lenke. Legg appen til på Hjem-skjerm på mobilen (del-knappen → "
+    "«Legg til på Hjem-skjerm») – da åpner snarveien rett inn.":
+        "Du kommer in via din personliga länk. Lägg till appen på Hemskärmen på mobilen (dela-knappen → "
+        "«Lägg till på Hemskärmen») – då öppnar genvägen direkt.",
+    # Brukere (admin)
+    "Opprett selgere og gi dem personlig innloggingslenke":
+        "Skapa säljare och ge dem en personlig inloggningslänk",
+    "Klimaavtrykk pr. selger": "Klimatavtryck per säljare",
+    "Ingen registrerte besøk i perioden.": "Inga registrerade besök i perioden.",
+    "Selgere": "Säljare", "Totalt CO₂e": "Totalt CO₂e", "(uten navn)": "(utan namn)",
+    "**Ny bruker**": "**Ny användare**", "E-post": "E-post", "Opprett / ny lenke": "Skapa / ny länk",
+    "Bruker klar – lenken vises til høyre.": "Användare klar – länken visas till höger.",
+    "Skriv inn e-post.": "Skriv in e-post.",
+    "Legg **APP_BASE_URL** i Streamlit Secrets (appens adresse) for komplette lenker.":
+        "Lägg **APP_BASE_URL** i Streamlit Secrets (appens adress) för kompletta länkar.",
+    "Ingen lenke ennå – trykk «Ny lenke».": "Ingen länk ännu – tryck «Ny länk».",
+    "Ny lenke": "Ny länk", "Steng lenke": "Stäng länk",
+    # E-postinnhold (admin)
+    "Rediger de automatiske e-postene. Selgerne ser ikke denne siden.":
+        "Redigera de automatiska e-postmeddelandena. Säljarna ser inte denna sida.",
+    "Emne": "Ämne", "Tekst": "Text",
+    "Variabler som fylles automatisk:": "Variabler som fylls i automatiskt:", "Lagre": "Spara",
+    "Send testmail (kontroll før lansering)": "Skicka testmejl (kontroll före lansering)",
+    "Legger en test i kø og sendes av E-postjobben (kjør den i GitHub Actions eller vent inntil 1 time).":
+        "Lägger en test i kö som skickas av E-postjobbet (kör det i GitHub Actions eller vänta upp till 1 timme).",
+    "Send test til": "Skicka test till", "Type": "Typ", "Forhåndsvisning:": "Förhandsvisning:",
+    "Legg testmail i kø": "Lägg testmejl i kö",
+    # feil / toast
+    "Kunne ikke lagre:": "Kunde inte spara:", "Kunne ikke hente:": "Kunde inte hämta:",
+    "Kunne ikke hente brukere:": "Kunde inte hämta användare:", "Kunne ikke legge i kø:": "Kunde inte lägga i kö:",
+    "Besøk oppdatert.": "Besök uppdaterat.", "Dagens rute slettet.": "Dagens rutt raderad.",
+    "Alle ekskluderte bedrifter er gjenåpnet.": "Alla exkluderade företag är återöppnade.",
+    "Besøk slettet.": "Besök raderat.", "Besøk nullstilt.": "Besök återställt.",
+    "Alle kommende ruter slettet.": "Alla kommande rutter raderade.",
+    "Fant ingen annen passende bedrift i nærheten.": "Hittade inget annat passande företag i närheten.",
+    "fjernet fra ruta.": "borttaget från rutten.", "skjult permanent.": "dolt permanent.",
+    "Byttet til": "Bytte till", "dag(er) lagt i Min dag.": "dag(ar) lagd i Min dag.",
+    "Besøk registrert – rapport sendt.": "Besök registrerat – rapport skickad.",
+    " Kunden skjules fra framtidige forslag.": " Kunden döljs från framtida förslag.",
+    " Bedriften er merket besøkt.": " Företaget är markerat som besökt.",
+    "Lagret. Rapporten er sendt.": "Sparat. Rapporten är skickad.",
+    "Lagret. Rapport sendt og «takk for praten» lagt i kø.":
+        "Sparat. Rapport skickad och «tack för pratstunden» lagd i kö.",
+    "Startposisjon:": "Startposition:",
+    " (Fant ikke adressen – startposisjon ikke satt.)": " (Hittade inte adressen – startposition ej satt.)",
+    "Testmail lagt i kø til": "Testmejl lagt i kö till",
+    "Kjør «E-postjobb» i GitHub Actions for å sende nå.":
+        "Kör «E-postjobb» i GitHub Actions för att skicka nu.",
+    # kalender-ukedager (korte)
+    "Man": "Mån", "Tir": "Tis", "Lør": "Lör", "Søn": "Sön",
+}
+
+UKEDAGER = _Loc(
+    ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"],
+    ["måndag", "tisdag", "onsdag", "torsdag", "fredag", "lördag", "söndag"])
+
 DEFAULT_CONTENT = {
     "thankyou": {
         "subject": "Takk for praten – BNC Nordic",
@@ -402,7 +696,7 @@ def land_picker(widget_key, **kw):
     ellers nullstilles når widgeten ikke vises på alle steg."""
     opts = list(LAND_NAVN)
     cur = st.session_state.get("land", "NO")
-    sel = st.radio("Land", opts, index=opts.index(cur) if cur in opts else 0,
+    sel = st.radio(t("Land"), opts, index=opts.index(cur) if cur in opts else 0,
                    key=widget_key, horizontal=True,
                    format_func=lambda x: LAND_NAVN[x], **kw)
     st.session_state["land"] = sel
@@ -729,9 +1023,9 @@ if APP_PASSWORD and not st.session_state.get("_authed"):
     cols = st.columns([1, 1, 1])
     with cols[1]:
         _logo(LOGO_NAVY, 170)
-        st.subheader("Selger på veien")
-        _pw = st.text_input("Passord", type="password")
-        if st.button("Logg inn", type="primary", use_container_width=True):
+        st.subheader(t("Selger på veien"))
+        _pw = st.text_input(t("Passord"), type="password")
+        if st.button(t("Logg inn"), type="primary", use_container_width=True):
             if _pw == APP_PASSWORD:
                 st.session_state["_authed"] = True
                 st.query_params["t"] = LOGIN_TOKEN
@@ -748,13 +1042,13 @@ if not email:
     cols = st.columns([1, 1, 1])
     with cols[1]:
         _logo(LOGO_NAVY, 170)
-        st.subheader("Selger på veien")
-        e = st.text_input("Din e-post", placeholder="navn@bncnordic.no")
-        if st.button("Fortsett", type="primary", use_container_width=True):
+        st.subheader(t("Selger på veien"))
+        e = st.text_input(t("Din e-post"), placeholder=t("navn@bncnordic.no"))
+        if st.button(t("Fortsett"), type="primary", use_container_width=True):
             if e.strip():
                 st.session_state["user_email"] = e.strip().lower()
                 st.rerun()
-        st.caption("Selgere kommer vanligvis inn via sin personlige lenke og slipper dette.")
+        st.caption(t("Selgere kommer vanligvis inn via sin personlige lenke og slipper dette."))
     st.stop()
 
 if _qp.get("u") != email:
@@ -763,6 +1057,15 @@ if LOGIN_TOKEN and _qp.get("t") != LOGIN_TOKEN:
     st.query_params["t"] = LOGIN_TOKEN
 
 _settings = load_settings(email)
+# Visningsspråk: fra lagret innstilling / URL (?lang=) / default norsk. Settes i Innstillinger.
+if "lang" not in st.session_state:
+    _sl = (_settings.get("lang") or "").lower()
+    if _sl not in ("no", "sv"):
+        try:
+            _sl = st.query_params.get("lang")
+        except Exception:
+            _sl = None
+    st.session_state["lang"] = _sl if _sl in ("no", "sv") else "no"
 is_admin = email in ADMIN_EMAILS
 companies = companies_for(current_land())
 if not companies and current_land() != "NO":
@@ -770,8 +1073,8 @@ if not companies and current_land() != "NO":
     _miss = current_land()
     st.session_state["land"] = "NO"
     companies = companies_for("NO")
-    st.session_state["_toast"] = (f"Data for {LAND_NAVN.get(_miss, _miss)} er ikke lagt inn "
-                                   "ennå – viser Norge.")
+    st.session_state["_toast"] = (f"{t('Data for')} {LAND_NAVN.get(_miss, _miss)} "
+                                   + t("er ikke lagt inn ennå – viser Norge."))
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -802,10 +1105,11 @@ pages = USER_PAGES + (ADMIN_PAGES if is_admin else [])
 _goto = st.session_state.pop("_goto", None)
 with st.sidebar:
     _logo(LOGO_WHITE, 150)
+    _navlabels = [t(p) for p in pages]   # vist tekst (språk) – intern verdi holdes norsk
     if HAS_OPTION_MENU:
         _mi = pages.index(_goto) if _goto in pages else None
-        nav = option_menu(
-            None, pages, icons=[PAGE_ICONS[p] for p in pages],
+        _navsel = option_menu(
+            None, _navlabels, icons=[PAGE_ICONS[p] for p in pages],
             default_index=0, key="nav_menu", manual_select=_mi,
             styles={
                 "container": {"background-color": "#1b2a4a", "padding": "8px 4px"},
@@ -815,10 +1119,11 @@ with st.sidebar:
                                       "font-weight": "600"},
                 "icon": {"color": "#9fb0cb", "font-size": "15px"},
             })
+        nav = pages[_navlabels.index(_navsel)] if _navsel in _navlabels else pages[0]
     else:
         if _goto in pages:
             st.session_state["nav_menu"] = _goto
-        nav = st.radio("Meny", pages, label_visibility="collapsed", key="nav_menu")
+        nav = st.radio(t("Meny"), pages, label_visibility="collapsed", key="nav_menu", format_func=t)
     st.markdown("<div style='flex:1'></div>", unsafe_allow_html=True)
     st.markdown(
         f"<div style='color:#c3ccdd;font-size:12.5px;border-top:1px solid #33456b;"
@@ -828,12 +1133,12 @@ with st.sidebar:
     try:
         _cm, _cy = user_co2_totals(email)
         st.markdown(
-            f"<div style='color:#9fe3bf;font-size:12px;margin-top:6px'>Klimaavtrykk: "
-            f"<b>{_cm} kg</b> denne mnd · {_cy} kg i år</div>",
+            f"<div style='color:#9fe3bf;font-size:12px;margin-top:6px'>{t('Klimaavtrykk:')} "
+            f"<b>{_cm} kg</b> {t('denne mnd')} · {_cy} {t('kg i år')}</div>",
             unsafe_allow_html=True)
     except Exception:
         pass
-    if st.button("Logg ut", use_container_width=True):
+    if st.button(t("Logg ut"), use_container_width=True):
         st.query_params.clear()
         for k in list(st.session_state.keys()):
             st.session_state.pop(k, None)
@@ -843,9 +1148,9 @@ if _goto in pages and nav != _goto:
 
 if not companies:
     _lf = DATA_FILES.get(current_land())
-    st.warning(f"Bedriftslista for {LAND_NAVN.get(current_land(), current_land())} "
-               f"({_lf.name if _lf else '?'}) mangler eller er tom. "
-               "Bytt søkeområde under Innstillinger.")
+    st.warning(f"{t('Bedriftslista for')} {LAND_NAVN.get(current_land(), current_land())} "
+               f"({_lf.name if _lf else '?'}) "
+               + t("mangler eller er tom. Bytt søkeområde under Innstillinger."))
     st.stop()
 
 
@@ -855,7 +1160,7 @@ def page_header(title, sub):
     st.write("")
 
 
-UKEDAGER = ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"]
+# (UKEDAGER er definert språkavhengig lenger opp)
 _kat_present = [k for k in KATEGORIER if any(c.get("kategori") == k for c in companies)]
 if any(c.get("ditec") for c in companies):
     _kat_present = ["Ditec"] + _kat_present   # eget filtervalg for Ditec-sentre
@@ -1278,16 +1583,16 @@ def register_dialog(company):
                 f"{company.get('postnr','')} {company.get('poststed','')}</span>",
                 unsafe_allow_html=True)
     with st.form(f"reg_{company.get('orgnr')}"):
-        outcome = st.selectbox("Besøksresultat", ["Interessert", "Vil tenke", "Ikke interessert",
-                                                  "Ikke til stede", "Solgt", "Annet"])
-        report = st.text_area("Besøksrapport", placeholder="Hva skjedde på besøket …", height=130)
-        contact = st.text_input("Kundens e-post", value=company.get("epost", ""))
-        send_thanks = st.checkbox("Send «takk for praten» (går ut 2 virkedager etter)",
+        outcome = st.selectbox(t("Besøksresultat"), ["Interessert", "Vil tenke", "Ikke interessert",
+                                                  "Ikke til stede", "Solgt", "Annet"], format_func=t)
+        report = st.text_area(t("Besøksrapport"), placeholder=t("Hva skjedde på besøket …"), height=130)
+        contact = st.text_input(t("Kundens e-post"), value=company.get("epost", ""))
+        send_thanks = st.checkbox(t("Send «takk for praten» (går ut 2 virkedager etter)"),
                                   value=bool(company.get("epost")))
-        no_more = st.checkbox("Ikke besøk denne kunden igjen",
-                              help="Skjuler bedriften permanent fra framtidige forslag. "
-                                   "Kan angres under Innstillinger → Ekskluderte bedrifter.")
-        lagre_besok = st.form_submit_button("Lagre besøk og send rapport", type="primary",
+        no_more = st.checkbox(t("Ikke besøk denne kunden igjen"),
+                              help=t("Skjuler bedriften permanent fra framtidige forslag. "
+                                   "Kan angres under Innstillinger → Ekskluderte bedrifter."))
+        lagre_besok = st.form_submit_button(t("Lagre besøk og send rapport"), type="primary",
                                             use_container_width=True)
     if lagre_besok:
         try:
@@ -1324,12 +1629,12 @@ def register_dialog(company):
             if no_more:
                 exclude_company(email, company)
             user_co2_totals.clear()
-            _m = "Besøk registrert – rapport sendt."
-            st.session_state["_toast"] = _m + (" Kunden skjules fra framtidige forslag."
-                                               if no_more else " Bedriften er merket besøkt.")
+            _m = t("Besøk registrert – rapport sendt.")
+            st.session_state["_toast"] = _m + (t(" Kunden skjules fra framtidige forslag.")
+                                               if no_more else t(" Bedriften er merket besøkt."))
             st.rerun()
         except Exception as exc:
-            st.error(f"Kunne ikke lagre: {exc}")
+            st.error(t("Kunne ikke lagre:") + f" {exc}")
 
 
 VISIT_OUTCOMES = ["Interessert", "Vil tenke", "Ikke interessert",
@@ -1346,20 +1651,20 @@ def edit_visit_dialog(r):
     if cur and cur not in opts:
         opts = [cur] + opts
     with st.form(f"edit_{r.get('id')}"):
-        outcome = st.selectbox("Besøksresultat", opts,
+        outcome = st.selectbox(t("Besøksresultat"), opts, format_func=t,
                                index=opts.index(cur) if cur in opts else 0)
-        report = st.text_area("Besøksrapport", value=r.get("report") or "", height=140)
-        contact = st.text_input("Kundens e-post", value=r.get("contact_email") or "")
-        lagre = st.form_submit_button("Lagre endringer", type="primary",
+        report = st.text_area(t("Besøksrapport"), value=r.get("report") or "", height=140)
+        contact = st.text_input(t("Kundens e-post"), value=r.get("contact_email") or "")
+        lagre = st.form_submit_button(t("Lagre endringer"), type="primary",
                                       use_container_width=True)
     if lagre:
         try:
             sb_update("visits", {"id": f"eq.{r.get('id')}"},
                       {"outcome": outcome, "report": report, "contact_email": contact})
-            st.session_state["_toast"] = "Besøk oppdatert."
+            st.session_state["_toast"] = t("Besøk oppdatert.")
             st.rerun()
         except Exception as exc:
-            st.error(f"Kunne ikke lagre: {exc}")
+            st.error(t("Kunne ikke lagre:") + f" {exc}")
 
 
 def route_map(start, route, dest=None, route_pts=None):
@@ -1422,7 +1727,7 @@ def leaflet_route_html(start, route, height=360, line_color="#1b2a4a", dest=None
         pts.append({"lat": dest["lat"], "lon": dest["lon"], "label": "M",
                     "navn": dest.get("label") or "Mål", "kind": "dest"})
     if not pts:
-        st.caption("Ingen punkter å vise på kart.")
+        st.caption(t("Ingen punkter å vise på kart."))
         return
     # Linje = korridoren (route_pts) hvis vi har den, ellers koble start→stopp→mål.
     line = route_pts if (route_pts and len(route_pts) >= 2) else [[p["lat"], p["lon"]] for p in pts]
@@ -1490,7 +1795,7 @@ def leaflet_multi_html(plans, height=420, focus=None):
             pts.append({"lat": s["lat"], "lon": s["lon"], "label": str(nr),
                         "navn": s.get("navn", ""), "dag": dag, "color": col})
     if not pts and not paths:
-        st.caption("Ingen punkter å vise på kart.")
+        st.caption(t("Ingen punkter å vise på kart."))
         return
     tmpl = """<!doctype html><html><head><meta charset="utf-8">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -1572,7 +1877,7 @@ def multi_route_map(plans):
             if len(line) >= 2:
                 paths.append({"path": line, "color": col})
         if not pts:
-            st.caption("Ingen punkter å vise på kart.")
+            st.caption(t("Ingen punkter å vise på kart."))
             return
         span = max(max(all_lat) - min(all_lat), max(all_lon) - min(all_lon))
         zoom = (11 if span < 0.15 else 10 if span < 0.3 else 9 if span < 0.6 else
@@ -1611,10 +1916,14 @@ def multi_route_map(plans):
 
 
 # -------------------------------------------------- Planlegging-wizard (UI) ----
-MND_FULL = ["januar", "februar", "mars", "april", "mai", "juni", "juli", "august",
-            "september", "oktober", "november", "desember"]
-MND_ABBR = ["jan.", "feb.", "mars", "apr.", "mai", "juni", "juli", "aug.",
-            "sep.", "okt.", "nov.", "des."]
+MND_FULL = _Loc(
+    ["januar", "februar", "mars", "april", "mai", "juni", "juli", "august",
+     "september", "oktober", "november", "desember"],
+    ["januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti",
+     "september", "oktober", "november", "december"])
+MND_ABBR = _Loc(
+    ["jan.", "feb.", "mars", "apr.", "mai", "juni", "juli", "aug.", "sep.", "okt.", "nov.", "des."],
+    ["jan.", "feb.", "mars", "apr.", "maj", "juni", "juli", "aug.", "sep.", "okt.", "nov.", "dec."])
 
 
 def fmt_date_no(d):
@@ -1706,46 +2015,46 @@ if nav == "Min dag":
         def _fmt_day(iso):
             dt = datetime.fromisoformat(iso).date()
             n = len(byd.get(iso, {}).get("companies") or [])
-            tag = f" — {n} besøk" if n else " — ingen rute"
-            pre = "I dag · " if dt == today else ""
+            tag = f" — {n} {t('besøk')}" if n else t(" — ingen rute")
+            pre = t("I dag · ") if dt == today else ""
             return f"{pre}{UKEDAGER[dt.weekday()].capitalize()} {dt.strftime('%d.%m.%Y')}{tag}"
-        sel_iso = st.selectbox("Velg dag", opts, index=opts.index(default_iso),
+        sel_iso = st.selectbox(t("Velg dag"), opts, index=opts.index(default_iso),
                                format_func=_fmt_day)
     seldate = datetime.fromisoformat(sel_iso).date()
     wd = UKEDAGER[seldate.weekday()].capitalize()
-    _subtitle = ("dagens planlagte rute" if seldate == today else "planlagt rute")
-    page_header("Min dag", f"{wd} {seldate.strftime('%d.%m.%Y')} – {_subtitle}")
+    _subtitle = t("dagens planlagte rute") if seldate == today else t("planlagt rute")
+    page_header(t("Min dag"), f"{wd} {seldate.strftime('%d.%m.%Y')} – {_subtitle}")
     plan = byd.get(sel_iso) or get_plan(email, seldate)
     route = (plan or {}).get("companies") or []
     start = (plan or {}).get("start")
     meta = (plan or {}).get("meta") or {}
 
     if not route:
-        _når = "i dag" if seldate == today else "denne dagen"
-        st.info(f"Ingen planlagt rute {_når}. Gå til **Planlegging** for å sette opp ruter "
-                "– eller bruk **Drop-in** for et besøk på sparket.")
+        _når = t("i dag") if seldate == today else t("denne dagen")
+        st.info(t("Ingen planlagt rute") + f" {_når}. "
+                + t("Gå til **Planlegging** for å sette opp ruter – eller bruk **Drop-in** for et besøk på sparket."))
     else:
         h = int(meta.get("total_min", 0)) // 60
         m = int(meta.get("total_min", 0)) % 60
         day_co2 = co2_kg(meta.get("total_km", 0), _settings)
         s1, s2, s3, s4 = st.columns(4)
-        s1.markdown(f"<div class='bnc-stat'><div class='k'>Besøk i ruta</div>"
+        s1.markdown(f"<div class='bnc-stat'><div class='k'>{t('Besøk i ruta')}</div>"
                     f"<div class='v'>{len(route)}</div></div>", unsafe_allow_html=True)
-        s2.markdown(f"<div class='bnc-stat'><div class='k'>Samlet kjøring</div>"
+        s2.markdown(f"<div class='bnc-stat'><div class='k'>{t('Samlet kjøring')}</div>"
                     f"<div class='v'>{meta.get('total_km',0)} <small>km</small></div></div>", unsafe_allow_html=True)
-        s3.markdown(f"<div class='bnc-stat'><div class='k'>Beregnet tid</div>"
+        s3.markdown(f"<div class='bnc-stat'><div class='k'>{t('Beregnet tid')}</div>"
                     f"<div class='v'>{h} t {m} <small>min</small></div></div>", unsafe_allow_html=True)
-        s4.markdown(f"<div class='bnc-stat'><div class='k'>Klimaavtrykk</div>"
+        s4.markdown(f"<div class='bnc-stat'><div class='k'>{t('Klimaavtrykk')}</div>"
                     f"<div class='v'>{day_co2} <small>kg CO₂e</small></div></div>", unsafe_allow_html=True)
         st.write("")
 
         mc1, mc2 = st.columns([3, 1])
-        show_map = mc1.checkbox("Vis kart", value=True)
-        if mc2.button("Slett dagen", key="mindag_del", use_container_width=True,
-                      help="Slett hele den planlagte ruta for denne dagen"):
+        show_map = mc1.checkbox(t("Vis kart"), value=True)
+        if mc2.button(t("Slett dagen"), key="mindag_del", use_container_width=True,
+                      help=t("Slett hele den planlagte ruta for denne dagen")):
             try:
                 delete_plan(email, seldate.isoformat())
-                st.session_state["_toast"] = "Dagens rute slettet."
+                st.session_state["_toast"] = t("Dagens rute slettet.")
                 st.rerun()
             except Exception as exc:
                 st.error(f"{exc}")
@@ -1753,8 +2062,8 @@ if nav == "Min dag":
         with list_col:
             g_url = gmaps_route_url(start, route, dest=meta.get("dest")) if start else None
             if g_url:
-                st.link_button("Åpne hele ruta i Google Maps", g_url, use_container_width=True)
-            st.markdown("#### Dagens besøk")
+                st.link_button(t("Åpne hele ruta i Google Maps"), g_url, use_container_width=True)
+            st.markdown(t("#### Dagens besøk"))
             visited = visited_orgnr_this_month(email)
             for s in route:
                 org = str(s.get("orgnr"))
@@ -1774,32 +2083,32 @@ if nav == "Min dag":
                     f"<small>{_omv}</small></div>",
                     unsafe_allow_html=True)
                 if done:
-                    if st.button("Angre besøk", key=f"undo_{org}"):
+                    if st.button(t("Angre besøk"), key=f"undo_{org}"):
                         try:
                             delete_visit(email, org)
-                            st.session_state["_toast"] = "Besøk nullstilt."
+                            st.session_state["_toast"] = t("Besøk nullstilt.")
                             st.rerun()
                         except Exception as exc:
                             st.error(f"{exc}")
                 else:
                     b1, b2, b3, b4 = st.columns([3, 3, 1, 1.5])
-                    if b1.button("Registrer", key=f"reg_{org}", use_container_width=True):
+                    if b1.button(t("Registrer"), key=f"reg_{org}", use_container_width=True):
                         register_dialog(s)
-                    b2.link_button("Naviger", gmaps_dest_url(s), use_container_width=True)
-                    if b3.button("✕", key=f"rm_{org}",
-                                 help="Fjern fra ruta (kan dukke opp igjen senere)",
+                    b2.link_button(t("Naviger"), gmaps_dest_url(s), use_container_width=True)
+                    if b3.button(t("✕"), key=f"rm_{org}",
+                                 help=t("Fjern fra ruta (kan dukke opp igjen senere)"),
                                  use_container_width=True):
                         try:
                             rest = [x for x in route if str(x.get("orgnr")) != org]
                             for i, x in enumerate(rest):
                                 x["stop"] = i + 1
                             _save_recompute(email, seldate, start, rest, meta)
-                            st.session_state["_toast"] = f"{s.get('navn','')} fjernet fra ruta."
+                            st.session_state["_toast"] = f"{s.get('navn','')} " + t("fjernet fra ruta.")
                             st.rerun()
                         except Exception as exc:
                             st.error(f"{exc}")
-                    if b4.button("Skjul", key=f"exc_{org}",
-                                 help="Ikke aktuell – skjul permanent fra framtidige forslag",
+                    if b4.button(t("Skjul"), key=f"exc_{org}",
+                                 help=t("Ikke aktuell – skjul permanent fra framtidige forslag"),
                                  use_container_width=True):
                         try:
                             exclude_company(email, s)
@@ -1807,7 +2116,7 @@ if nav == "Min dag":
                             for i, x in enumerate(rest):
                                 x["stop"] = i + 1
                             _save_recompute(email, seldate, start, rest, meta)
-                            st.session_state["_toast"] = f"{s.get('navn','')} skjult permanent."
+                            st.session_state["_toast"] = f"{s.get('navn','')} " + t("skjult permanent.")
                             st.rerun()
                         except Exception as exc:
                             st.error(f"{exc}")
@@ -1819,12 +2128,12 @@ if nav == "Min dag":
 
 # =============================================================== DROP-IN ======
 if nav == "Drop-in":
-    page_header("Drop-in", "Søk opp en bedrift og registrer et besøk på sparket")
+    page_header(t("Drop-in"), t("Søk opp en bedrift og registrer et besøk på sparket"))
     with st.form("dropin_sok"):
         sc1, sc2 = st.columns([5, 1])
-        q = sc1.text_input("Søk bedrift (navn eller org.nr)",
-                           placeholder="Skriv navn eller org.nr …", label_visibility="collapsed")
-        sc2.form_submit_button("Søk", use_container_width=True)
+        q = sc1.text_input(t("Søk bedrift (navn eller org.nr)"),
+                           placeholder=t("Skriv navn eller org.nr …"), label_visibility="collapsed")
+        sc2.form_submit_button(t("Søk"), use_container_width=True)
     if q:
         toks = [t for t in q.strip().lower().split() if t]
         qd = "".join(ch for ch in q if ch.isdigit())
@@ -1838,22 +2147,22 @@ if nav == "Drop-in":
 
         hits = [c for c in companies if _match(c)][:25]
         if not hits:
-            st.caption("Ingen treff. Prøv færre ord, eller søk på org./bedr.nr.")
+            st.caption(t("Ingen treff. Prøv færre ord, eller søk på org./bedr.nr."))
         for c in hits:
             cc = st.columns([5, 2])
             cc[0].markdown(f"**{c.get('navn','')}**  \n"
                            f"<span class='bnc-sub'>{c.get('kategori','')} · "
                            f"{c.get('poststed','')} · nr {c.get('orgnr','')}</span>",
                            unsafe_allow_html=True)
-            if cc[1].button("Registrer", key=f"d_{c.get('orgnr')}", use_container_width=True):
+            if cc[1].button(t("Registrer"), key=f"d_{c.get('orgnr')}", use_container_width=True):
                 register_dialog(c)
     else:
-        st.info("Søk opp en bedrift for å registrere et drop-in-besøk.")
+        st.info(t("Søk opp en bedrift for å registrere et drop-in-besøk."))
 
 
 # ============================================================ PLANLEGGING ======
 if nav == "Planlegging":
-    page_header("Planlegg besøk", "Finn kundebesøk langs ruta di.")
+    page_header(t("Planlegg besøk"), t("Finn kundebesøk langs ruta di."))
     today = date.today()
     ss = st.session_state
     ss.setdefault("pl_step", 1)
@@ -1889,17 +2198,17 @@ if nav == "Planlegging":
         plans = ss["pl_preview"]
         tot_km = sum(float(p["meta"].get("total_km") or 0) for p in plans)
         tot_n = sum(len(p["companies"]) for p in plans)
-        st.markdown("#### Forslag til rute – godkjenn for å legge i Min dag")
+        st.markdown(t("#### Forslag til rute – godkjenn for å legge i Min dag"))
         st.caption(f"{len(plans)} dag(er) · {tot_n} forslag · ca. {tot_km:.0f} km totalt. "
                    "Klikk på en bedrift for å zoome til den i kartet. "
                    "Ingenting lagres før du trykker «Godkjenn».")
         st.caption(
-            "Obs om adressene: Vi bruker den adressen som er registrert i Brønnøysund for "
+            t("Obs om adressene: Vi bruker den adressen som er registrert i Brønnøysund for "
             "Norge, for Sverige: SCB (Statistiska centralbyrån). Den er ikke alltid den samme "
             "som der bedriften faktisk holder til. Sjekk «Nettside» eller «Google» før du drar "
-            "hvis noe ser rart ut.")
+            "hvis noe ser rart ut."))
         _focus = ss.get("pv_focus")
-        if _focus and st.button("Vis hele ruta i kartet", key="pv_focus_clear"):
+        if _focus and st.button(t("Vis hele ruta i kartet"), key="pv_focus_clear"):
             ss["pv_focus"] = None
             st.rerun()
         if len(plans) > 1:
@@ -1914,7 +2223,7 @@ if nav == "Planlegging":
                     leaflet_route_html(p["start"], p["companies"], dest=meta.get("dest"),
                                        route_pts=meta.get("route_pts"), focus=_focus)
                 if not p["companies"]:
-                    st.caption("Ingen forslag igjen for denne dagen.")
+                    st.caption(t("Ingen forslag igjen for denne dagen."))
                 for i, c in enumerate(p["companies"], 1):
                     org = str(c.get("orgnr"))
                     sub = []
@@ -1930,7 +2239,7 @@ if nav == "Planlegging":
                     with ctxt:
                         if st.button(f"{i}. {c.get('navn', '')}", key=f"pv_focus_{pi}_{org}",
                                      type="tertiary", use_container_width=True,
-                                     help="Zoom til denne bedriften i kartet"):
+                                     help=t("Zoom til denne bedriften i kartet")):
                             if c.get("lat") is not None:
                                 ss["pv_focus"] = [c["lat"], c["lon"]]
                                 st.rerun()
@@ -1942,30 +2251,30 @@ if nav == "Planlegging":
                     if site:
                         _url = (site if site.lower().startswith(("http://", "https://"))
                                 else "https://" + site)
-                        cgoog.link_button("Nettside", _url, use_container_width=True,
-                                          help="Åpne bedriftens nettside i ny fane")
+                        cgoog.link_button(t("Nettside"), _url, use_container_width=True,
+                                          help=t("Åpne bedriftens nettside i ny fane"))
                     else:
-                        cgoog.link_button("Google", google_q(c), use_container_width=True,
-                                          help="Google-søk på bedriften i ny fane")
-                    if cbyt.button("Bytt", key=f"pv_byt_{pi}_{org}", use_container_width=True,
-                                   help="Finn en annen bedrift i nærheten i stedet"):
+                        cgoog.link_button(t("Google"), google_q(c), use_container_width=True,
+                                          help=t("Google-søk på bedriften i ny fane"))
+                    if cbyt.button(t("Bytt"), key=f"pv_byt_{pi}_{org}", use_container_width=True,
+                                   help=t("Finn en annen bedrift i nærheten i stedet")):
                         alt = alt_company(meta, p["companies"], org)
                         if alt:
                             p["companies"][i - 1] = alt
                             _preview_recompute(p)
                             st.rerun()
                         else:
-                            st.toast("Fant ingen annen aktuell bedrift i nærheten.")
-                    if cfj.button("✕", key=f"pv_fj_{pi}_{org}", use_container_width=True,
-                                  help="Fjern dette forslaget"):
+                            st.toast(t("Fant ingen annen aktuell bedrift i nærheten."))
+                    if cfj.button(t("✕"), key=f"pv_fj_{pi}_{org}", use_container_width=True,
+                                  help=t("Fjern dette forslaget")):
                         p["companies"].pop(i - 1)
                         _preview_recompute(p)
                         st.rerun()
-        st.caption("Fjern forslag du ikke vil ha med «✕», eller bytt det ut med en annen "
-                   "bedrift i nærheten med «Bytt». Ingenting lagres før du godkjenner.")
+        st.caption(t("Fjern forslag du ikke vil ha med «✕», eller bytt det ut med en annen "
+                   "bedrift i nærheten med «Bytt». Ingenting lagres før du godkjenner."))
         st.divider()
         c_ok, c_no = st.columns([2, 1])
-        if c_ok.button("Godkjenn og legg i Min dag", type="primary",
+        if c_ok.button(t("Godkjenn og legg i Min dag"), type="primary",
                        use_container_width=True):
             save_plans(plans)
             n = len(plans)
@@ -1973,9 +2282,9 @@ if nav == "Planlegging":
             ss["pl_review"] = False
             ss["pv_focus"] = None
             ss["pl_step"] = 1
-            st.session_state["_toast"] = f"{n} dag(er) lagt i Min dag."
+            st.session_state["_toast"] = f"{n} " + t("dag(er) lagt i Min dag.")
             st.rerun()
-        if c_no.button("Forkast", use_container_width=True):
+        if c_no.button(t("Forkast"), use_container_width=True):
             ss["pl_preview"] = []
             ss["pl_review"] = False
             ss["pv_focus"] = None
@@ -1991,7 +2300,7 @@ if nav == "Planlegging":
             land_picker("land_pl",
                         help="Velg land før du søker. Styrer både stedssøk og hvilke "
                              "bedrifter som foreslås.")
-        st.markdown("#### Når skal du reise?")
+        st.markdown(t("#### Når skal du reise?"))
         st.caption(f"Velg én dag eller en periode. I dag er {UKEDAGER[today.weekday()]} "
                    f"{today.strftime('%d.%m.%Y')}.")
         active = "from" if (ss["w_from"] is None or ss["w_to"] is not None) else "to"
@@ -2001,17 +2310,17 @@ if nav == "Planlegging":
         calendar_daystyle(cy, cm, ss["w_from"], ss["w_to"], planned_set, today)
         with st.container(key="bnc_cal"):
             nv1, nv2, nv3 = st.columns([1, 2, 1])
-            if nv1.button("‹", use_container_width=True, key="cal_prev"):
+            if nv1.button(t("‹"), use_container_width=True, key="cal_prev"):
                 ss["w_calym"] = (cy - 1, 12) if cm == 1 else (cy, cm - 1)
                 st.rerun()
             nv2.markdown(f"<div style='text-align:center;font-weight:700;"
                          f"font-family:Archivo,sans-serif;padding-top:7px'>"
                          f"{MND_FULL[cm-1].capitalize()} {cy}</div>", unsafe_allow_html=True)
-            if nv3.button("›", use_container_width=True, key="cal_next"):
+            if nv3.button(t("›"), use_container_width=True, key="cal_next"):
                 ss["w_calym"] = (cy + 1, 1) if cm == 12 else (cy, cm + 1)
                 st.rerun()
             hdr = st.columns(7)
-            for i, wd in enumerate(["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"]):
+            for i, wd in enumerate([t("Man"), t("Tir"), t("Ons"), t("Tor"), t("Fre"), t("Lør"), t("Søn")]):
                 hdr[i].markdown(f"<div class='cal-wd'>{wd}</div>", unsafe_allow_html=True)
             for week in _cal.Calendar(firstweekday=0).monthdatescalendar(cy, cm):
                 cols = st.columns(7)
@@ -2022,26 +2331,26 @@ if nav == "Planlegging":
                         continue
                     if cols[i].button(str(d.day), key=f"cal_{d.isoformat()}",
                                       use_container_width=True):
-                        f, t = ss["w_from"], ss["w_to"]
-                        if f is None or t is not None:
+                        _wf, _wt = ss["w_from"], ss["w_to"]
+                        if _wf is None or _wt is not None:
                             ss["w_from"], ss["w_to"] = d, None
-                        elif d >= f:
+                        elif d >= _wf:
                             ss["w_to"] = d
                         else:
                             ss["w_from"], ss["w_to"] = d, None
                         st.rerun()
 
         if not ss["w_from"]:
-            st.caption("Velg en startdato i kalenderen.")
+            st.caption(t("Velg en startdato i kalenderen."))
         elif not ss["w_to"]:
-            st.caption("Velg sluttdato … (eller klikk samme dag igjen for én dag)")
+            st.caption(t("Velg sluttdato … (eller klikk samme dag igjen for én dag)"))
         elif ss["w_from"] == ss["w_to"]:
-            st.caption("Én dag valgt.")
+            st.caption(t("Én dag valgt."))
         else:
             _nd = (ss["w_to"] - ss["w_from"]).days + 1
-            st.caption(f"{_nd} dager valgt.")
+            st.caption(f"{_nd} " + t("dager valgt."))
 
-        if st.button("Neste: område  →", type="primary", use_container_width=True,
+        if st.button(t("Neste: område  →"), type="primary", use_container_width=True,
                      disabled=ss["w_from"] is None):
             ss["pl_step"] = 2
             st.rerun()
@@ -2054,11 +2363,11 @@ if nav == "Planlegging":
             rtxt = f"{UKEDAGER[fr.weekday()].capitalize()} {fr.strftime('%d.%m.%Y')}"
         else:
             rtxt = (f"{fr.strftime('%d.%m')} – {to.strftime('%d.%m.%Y')} "
-                    f"({count_weekdays(fr, to)} hverdager)")
+                    f"({count_weekdays(fr, to)} {t('hverdager')})")
         ps1, ps2 = st.columns([4, 1])
         ps1.markdown(f"<div class='psum'><span><span class='pv'>{rtxt}</span></span></div>",
                      unsafe_allow_html=True)
-        if ps2.button("Endre", use_container_width=True):
+        if ps2.button(t("Endre"), use_container_width=True):
             ss["pl_step"] = 1
             st.rerun()
 
@@ -2069,70 +2378,70 @@ if nav == "Planlegging":
             _d += timedelta(days=1)
         multi = len(days) > 1
 
-        st.markdown("#### Hvor skal du?")
-        ss["w_start"] = st.text_input("Startsted (base / min posisjon)", value=ss["w_start"],
-                                      placeholder="F.eks. Lillehammer", key="_w_start")
+        st.markdown(t("#### Hvor skal du?"))
+        ss["w_start"] = st.text_input(t("Startsted (base / min posisjon)"), value=ss["w_start"],
+                                      placeholder=t("F.eks. Lillehammer"), key="_w_start")
         if not multi:
-            ss["w_til"] = st.text_input("Til · destinasjon (valgfritt)", value=ss["w_til"],
-                                        placeholder="F.eks. Oslo", key="_w_til",
-                                        help="Fyll ut for drop-in langs veien. "
-                                             "Tomt = området rundt startstedet.")
-            st.caption("Mellomstopp underveis (valgfritt):")
+            ss["w_til"] = st.text_input(t("Til · destinasjon (valgfritt)"), value=ss["w_til"],
+                                        placeholder=t("F.eks. Oslo"), key="_w_til",
+                                        help=t("Fyll ut for drop-in langs veien. "
+                                             "Tomt = området rundt startstedet."))
+            st.caption(t("Mellomstopp underveis (valgfritt):"))
             for i in range(len(ss["w_vias"])):
                 mc1, mc2 = st.columns([6, 1])
                 ss["w_vias"][i] = mc1.text_input(f"Mellomstopp {i + 1}", value=ss["w_vias"][i],
                                                  key=f"_w_via_{i}", label_visibility="collapsed",
-                                                 placeholder="F.eks. Gjøvik")
-                if mc2.button("✕", key=f"w_via_del_{i}", use_container_width=True):
+                                                 placeholder=t("F.eks. Gjøvik"))
+                if mc2.button(t("✕"), key=f"w_via_del_{i}", use_container_width=True):
                     ss["w_vias"].pop(i)
                     st.rerun()
-            if st.button("Legg til mellomstopp", use_container_width=True):
+            if st.button(t("Legg til mellomstopp"), use_container_width=True):
                 ss["w_vias"].append("")
                 st.rerun()
-            ss["w_retur"] = st.checkbox("Tur-retur – hjem igjen til start samme dag",
+            ss["w_retur"] = st.checkbox(t("Tur-retur – hjem igjen til start samme dag"),
                                         value=ss["w_retur"], key="_w_retur")
-            st.caption("Med destinasjon foreslås drop-in langs veien (og hjemveien ved tur-retur). "
-                       "Uten destinasjon foreslås drop-in rundt startstedet.")
+            st.caption(t("Med destinasjon foreslås drop-in langs veien (og hjemveien ved tur-retur). "
+                       "Uten destinasjon foreslås drop-in rundt startstedet."))
         else:
-            st.radio("Reisemåte", ["base", "tour"], key="w_trip_mode", horizontal=True,
-                     format_func=lambda x: {"base": "Fast base (jobbe flere dager samme sted)",
-                                            "tour": "Rundreise (nytt sted hver dag)"}[x])
+            st.radio(t("Reisemåte"), ["base", "tour"], key="w_trip_mode", horizontal=True,
+                     format_func=lambda x: {"base": t("Fast base (jobbe flere dager samme sted)"),
+                                            "tour": t("Rundreise (nytt sted hver dag)")}[x])
             if ss["w_trip_mode"] == "base":
-                ss["w_base"] = st.text_input("Reisemål · der du jobber flere dager",
+                ss["w_base"] = st.text_input(t("Reisemål · der du jobber flere dager"),
                                              value=ss["w_base"], key="_w_base",
-                                             placeholder="F.eks. Trondheim")
+                                             placeholder=t("F.eks. Trondheim"))
                 _b = (ss["w_base"] or "").strip()
                 if _b:
-                    st.caption(f"Dag 1 er reisedagen {ss['w_start'] or 'start'} → {_b} "
-                               f"med bedrifter på veien. De øvrige dagene foreslås bedrifter "
-                               f"rundt {_b}. Du slipper å skrive {_b} på hver dag.")
+                    st.caption(t("Dag 1 er reisedagen") + f" {ss['w_start'] or 'start'} → {_b} "
+                               + t("med bedrifter på veien. De øvrige dagene foreslås bedrifter rundt")
+                               + f" {_b}. " + t("Du slipper å skrive") + f" {_b} " + t("på hver dag."))
                 else:
-                    st.caption("Skriv reisemålet én gang – det gjelder alle dagene.")
+                    st.caption(t("Skriv reisemålet én gang – det gjelder alle dagene."))
             else:
-                st.markdown("##### Reiserute – én etappe per dag")
-                st.caption("Skriv hvor du ender hver dag (overnatting). Neste dag starter der. "
-                           "Siste dag: sett sluttsted, f.eks. hjem.")
+                st.markdown(t("##### Reiserute – én etappe per dag"))
+                st.caption(t("Skriv hvor du ender hver dag (overnatting). Neste dag starter der. "
+                           "Siste dag: sett sluttsted, f.eks. hjem."))
                 if len(ss["w_legs"]) != len(days):
                     old = ss["w_legs"]
                     ss["w_legs"] = [old[i] if i < len(old) else "" for i in range(len(days))]
                 prev = (ss["w_start"] or "").strip() or "start"
                 for i, dy in enumerate(days):
-                    st.markdown(f"**Dag {i + 1} · {UKEDAGER[dy.weekday()].capitalize()} "
+                    st.markdown(f"**{t('Dag')} {i + 1} · {UKEDAGER[dy.weekday()].capitalize()} "
                                 f"{dy.strftime('%d.%m')}**  "
-                                f"<span class='bnc-sub'>— fra {prev}</span>", unsafe_allow_html=True)
-                    ss["w_legs"][i] = st.text_input(f"Til / overnatting dag {i + 1}",
+                                f"<span class='bnc-sub'>— {t('fra')} {prev}</span>", unsafe_allow_html=True)
+                    ss["w_legs"][i] = st.text_input(t("Til / overnatting dag") + f" {i + 1}",
                                                     value=ss["w_legs"][i], key=f"_w_leg_{i}",
-                                                    placeholder="F.eks. Oslo",
+                                                    placeholder=t("F.eks. Oslo"),
                                                     label_visibility="collapsed")
                     nxt = (ss["w_legs"][i] or "").strip()
-                    prev = nxt if nxt else "(samme sted)"
-                st.caption("La en dag stå tom hvis du bare vil jobbe området rundt startstedet.")
+                    prev = nxt if nxt else t("(samme sted)")
+                st.caption(t("La en dag stå tom hvis du bare vil jobbe området rundt startstedet."))
 
         bk, nx = st.columns(2)
-        if bk.button("←  Tilbake", use_container_width=True):
+        if bk.button(t("←  Tilbake"), use_container_width=True):
             ss["pl_step"] = 1
             st.rerun()
-        if nx.button("Neste: besøksvalg  →", type="primary", use_container_width=True,
+        if nx.button(t("Neste: besøksvalg  →"), type="primary", use_container_width=True,
                      disabled=not (ss["w_start"] or "").strip()):
             ss["pl_step"] = 3
             st.rerun()
@@ -2153,23 +2462,23 @@ if nav == "Planlegging":
         st.markdown(f"<div class='psum'><span><span class='pv'>{area}</span></span></div>",
                     unsafe_allow_html=True)
 
-        st.markdown("#### Besøksvalg")
+        st.markdown(t("#### Besøksvalg"))
         v1, v2 = st.columns(2)
-        ss["w_antall"] = v1.number_input("Besøk per dag", 1, 20, int(ss["w_antall"]), 1,
+        ss["w_antall"] = v1.number_input(t("Besøk per dag"), 1, 20, int(ss["w_antall"]), 1,
                                          key="_w_antall",
-                                         help="Så mange forslag spres langs ruta. Kim tar de "
-                                              "han rekker på veien.")
-        ss["w_visit"] = v2.number_input("Minutter per besøk", 10, 180, int(ss["w_visit"]), 5,
-                                        key="_w_visit", help="Kun for anslått kjøretid.")
+                                         help=t("Så mange forslag spres langs ruta. Kim tar de "
+                                              "han rekker på veien."))
+        ss["w_visit"] = v2.number_input(t("Minutter per besøk"), 10, 180, int(ss["w_visit"]), 5,
+                                        key="_w_visit", help=t("Kun for anslått kjøretid."))
 
         if ss["w_all"]:
-            bsum = "Alle bransjer"
+            bsum = t("Alle bransjer")
         elif ss["w_cat"]:
-            bsum = ", ".join(ss["w_cat"][:3]) + (" …" if len(ss["w_cat"]) > 3 else "")
+            bsum = ", ".join(t(c) for c in ss["w_cat"][:3]) + (" …" if len(ss["w_cat"]) > 3 else "")
         else:
-            bsum = "ingen valgt"
-        with st.expander(f"Bransjer: {bsum}"):
-            ss["w_all"] = st.checkbox("Alle aktuelle bransjer", value=ss["w_all"])
+            bsum = t("ingen valgt")
+        with st.expander(t("Bransjer:") + f" {bsum}"):
+            ss["w_all"] = st.checkbox(t("Alle aktuelle bransjer"), value=ss["w_all"])
             # Kun stabil `key`, ingen `default` – da re-monteres ikke widgeten ved hvert
             # klikk, nedtrekket holder seg åpent og flere bransjer kan velges etter hverandre.
             _cur = st.session_state.get("_w_cat")
@@ -2179,35 +2488,35 @@ if nav == "Planlegging":
                 _valid = [c for c in _cur if c in _kat_present]   # rydd ved f.eks. landbytte
                 if _valid != _cur:
                     st.session_state["_w_cat"] = _valid
-            st.multiselect("…eller velg selv", _kat_present, key="_w_cat",
-                           disabled=ss["w_all"])
+            st.multiselect(t("…eller velg selv"), _kat_present, key="_w_cat",
+                           format_func=t, disabled=ss["w_all"])
             ss["w_cat"] = list(st.session_state.get("_w_cat") or [])
             if current_land() == "SE":
-                st.caption("Tips: Det svenske registeret (SCB) har ingen egen kode for "
+                st.caption(t("Tips: Det svenske registeret (SCB) har ingen egen kode for "
                            "bilpleie, så flere bilpleie-/biltvätt-bedrifter ligger under "
-                           "«Verksted». Velg også Verksted for å finne flere.")
-        with st.expander("Flere valg"):
+                           "«Verksted». Velg også Verksted for å finne flere."))
+        with st.expander(t("Flere valg")):
             if current_land() == "NO":
                 _orgs = ["AS + ENK", "Kun AS", "Kun ENK"]
-                ss["w_org"] = st.selectbox("Selskapsform", _orgs,
+                ss["w_org"] = st.selectbox(t("Selskapsform"), _orgs, format_func=t,
                                            index=_orgs.index(ss["w_org"]) if ss["w_org"] in _orgs else 0,
                                            key="_w_org")
             else:
                 # Svenske data har ikke AS/ENK slik norske har – ikke filtrer på selskapsform.
                 ss["w_org"] = "AS + ENK"
-            ss["w_max"] = st.slider("Maks avstand mellom besøk (km, uten destinasjon)", 10, 300,
+            ss["w_max"] = st.slider(t("Maks avstand mellom besøk (km, uten destinasjon)"), 10, 300,
                                     int(ss["w_max"]), 10, key="_w_max")
-            ss["w_det"] = st.slider("Maks omvei fra ruta (km)", 2, 60,
+            ss["w_det"] = st.slider(t("Maks omvei fra ruta (km)"), 2, 60,
                                     int(ss["w_det"]), key="_w_det")
 
         bk2, go2 = st.columns([1, 2])
-        if bk2.button("←  Tilbake", use_container_width=True):
+        if bk2.button(t("←  Tilbake"), use_container_width=True):
             ss["pl_step"] = 2
             st.rerun()
-        if go2.button("Lag ruteforslag", type="primary", use_container_width=True):
+        if go2.button(t("Lag ruteforslag"), type="primary", use_container_width=True):
             valgte = _kat_present if ss["w_all"] else ss["w_cat"]
             if not valgte:
-                st.warning("Velg minst én bransje – eller huk av «Alle aktuelle bransjer».")
+                st.warning(t("Velg minst én bransje – eller huk av «Alle aktuelle bransjer»."))
             else:
                 days = []
                 _d = fr
@@ -2268,24 +2577,24 @@ if nav == "Planlegging":
     if ss["pl_step"] == 1:
         st.divider()
         kh1, kh2 = st.columns([3, 1])
-        kh1.markdown("#### Kommende ruter")
-        if upcoming and kh2.button("Tøm alle", key="del_all_plans", use_container_width=True,
-                                   help="Slett alle kommende planlagte ruter"):
+        kh1.markdown(t("#### Kommende ruter"))
+        if upcoming and kh2.button(t("Tøm alle"), key="del_all_plans", use_container_width=True,
+                                   help=t("Slett alle kommende planlagte ruter")):
             try:
                 sb_delete("planned_routes", {"user_email": f"eq.{email}",
                                              "plan_date": f"gte.{today.isoformat()}"})
                 planned_rows.clear()
-                st.session_state["_toast"] = "Alle kommende ruter slettet."
+                st.session_state["_toast"] = t("Alle kommende ruter slettet.")
                 st.rerun()
             except Exception as exc:
                 st.error(f"{exc}")
         if not upcoming:
-            st.caption("Ingen kommende ruter ennå – planlegg en rute over.")
+            st.caption(t("Ingen kommende ruter ennå – planlegg en rute over."))
         if len(upcoming) > 1:
             tot_km_all = round(sum(float((p.get("meta") or {}).get("total_km") or 0)
                                    for p in upcoming), 1)
             n_all = sum(len(p.get("companies") or []) for p in upcoming)
-            st.markdown(f"**Hele turen** — {len(upcoming)} dager · {n_all} forslag · "
+            st.markdown(f"**{t('Hele turen')}** — {len(upcoming)} {t('dager')} · {n_all} {t('forslag')} · "
                         f"≈ {tot_km_all} km")
             leaflet_multi_html(upcoming)
             st.write("")
@@ -2294,9 +2603,9 @@ if nav == "Planlegging":
         comps = p.get("companies") or []
         try:
             dt = datetime.fromisoformat(d).date()
-            tittel = f"{UKEDAGER[dt.weekday()].capitalize()} {dt.strftime('%d.%m.%Y')} — {len(comps)} forslag"
+            tittel = f"{UKEDAGER[dt.weekday()].capitalize()} {dt.strftime('%d.%m.%Y')} — {len(comps)} {t('forslag')}"
         except Exception:
-            dt, tittel = None, f"{d} — {len(comps)} forslag"
+            dt, tittel = None, f"{d} — {len(comps)} {t('forslag')}"
         pstart = p.get("start")
         pmeta = p.get("meta") or {}
         with st.expander(tittel):
@@ -2305,18 +2614,18 @@ if nav == "Planlegging":
             if way:
                 arrow = " → ".join(way) + (f" → {way[0]}" if pmeta.get("retur") else "")
                 st.caption(f"{arrow}")
-            st.caption(f"≈ {pmeta.get('total_km', 0)} km · {pm // 60}t {pm % 60}min kjøring"
-                       + (f" · {len(comps)} forslag" if comps else " · ingen forslag ennå"))
+            st.caption(f"≈ {pmeta.get('total_km', 0)} km · {pm // 60}t {pm % 60}min " + t("kjøring")
+                       + (f" · {len(comps)} {t('forslag')}" if comps else " · " + t("ingen forslag ennå")))
             pdest = pmeta.get("dest")
             rpts = pmeta.get("route_pts")
             if pstart and pstart.get("lat") is not None:
                 leaflet_route_html(pstart, comps, dest=pdest, route_pts=rpts)
             g_url = gmaps_route_url(pstart, comps, dest=pdest) if pstart else None
             if g_url:
-                st.link_button("Åpne ruta i Google Maps", g_url, use_container_width=True)
+                st.link_button(t("Åpne ruta i Google Maps"), g_url, use_container_width=True)
             if comps:
-                st.caption("Forslag til drop-in (valgfritt) — Bytt = annen bedrift · "
-                           "✕ fjern fra ruta · Skjul = permanent:")
+                st.caption(t("Forslag til drop-in (valgfritt) — Bytt = annen bedrift · "
+                           "✕ fjern fra ruta · Skjul = permanent:"))
             for s in comps:
                 org = str(s.get("orgnr"))
                 rc = st.columns([4, 1.2, 0.9, 1.3])
@@ -2330,8 +2639,8 @@ if nav == "Planlegging":
                     f"<span class='bnc-sub'>({s.get('poststed','')})</span><br>"
                     f"{badge}<span class='bnc-sub'>{s.get('kategori','')}</span>{extra}",
                     unsafe_allow_html=True)
-                if rc[1].button("Bytt", key=f"plr_{d}_{org}",
-                                help="Bytt ut med en annen bedrift i nærheten",
+                if rc[1].button(t("Bytt"), key=f"plr_{d}_{org}",
+                                help=t("Bytt ut med en annen bedrift i nærheten"),
                                 use_container_width=True):
                     try:
                         nyc = alt_company(pmeta, comps, org)
@@ -2340,14 +2649,14 @@ if nav == "Planlegging":
                             for i, x in enumerate(newc):
                                 x["stop"] = i + 1
                             _save_recompute(email, dt, pstart, newc, pmeta)
-                            st.session_state["_toast"] = f"Byttet til {nyc.get('navn','')}."
+                            st.session_state["_toast"] = t("Byttet til") + f" {nyc.get('navn','')}."
                         else:
-                            st.session_state["_toast"] = "Fant ingen annen passende bedrift i nærheten."
+                            st.session_state["_toast"] = t("Fant ingen annen passende bedrift i nærheten.")
                         st.rerun()
                     except Exception as exc:
                         st.error(f"{exc}")
-                if rc[2].button("✕", key=f"plx_{d}_{org}",
-                                help="Fjern fra denne ruta (kan dukke opp igjen senere)",
+                if rc[2].button(t("✕"), key=f"plx_{d}_{org}",
+                                help=t("Fjern fra denne ruta (kan dukke opp igjen senere)"),
                                 use_container_width=True):
                     try:
                         rest = [x for x in comps if str(x.get("orgnr")) != org]
@@ -2355,12 +2664,12 @@ if nav == "Planlegging":
                             x["stop"] = i + 1
                         if dt is not None:
                             _save_recompute(email, dt, pstart, rest, pmeta)
-                        st.session_state["_toast"] = f"{s.get('navn','')} fjernet fra ruta."
+                        st.session_state["_toast"] = f"{s.get('navn','')} " + t("fjernet fra ruta.")
                         st.rerun()
                     except Exception as exc:
                         st.error(f"{exc}")
-                if rc[3].button("Skjul", key=f"plb_{d}_{org}",
-                                help="Ikke aktuell – skjul permanent fra alle framtidige forslag",
+                if rc[3].button(t("Skjul"), key=f"plb_{d}_{org}",
+                                help=t("Ikke aktuell – skjul permanent fra alle framtidige forslag"),
                                 use_container_width=True):
                     try:
                         exclude_company(email, s)
@@ -2369,11 +2678,11 @@ if nav == "Planlegging":
                             x["stop"] = i + 1
                         if dt is not None:
                             _save_recompute(email, dt, pstart, rest, pmeta)
-                        st.session_state["_toast"] = f"{s.get('navn','')} skjult permanent."
+                        st.session_state["_toast"] = f"{s.get('navn','')} " + t("skjult permanent.")
                         st.rerun()
                     except Exception as exc:
                         st.error(f"{exc}")
-            if st.button("Slett ruten", key=f"delp_{d}"):
+            if st.button(t("Slett ruten"), key=f"delp_{d}"):
                 try:
                     delete_plan(email, d)
                     st.rerun()
@@ -2383,8 +2692,8 @@ if nav == "Planlegging":
 
 # ============================================================= HISTORIKK ======
 if nav == "Historikk":
-    page_header("Historikk", "Dine besøk og klimaavtrykk")
-    periode = st.radio("Periode", ["Denne måneden", "Hittil i år", "Alt"], horizontal=True)
+    page_header(t("Historikk"), t("Dine besøk og klimaavtrykk"))
+    periode = st.radio(t("Periode"), ["Denne måneden", "Hittil i år", "Alt"], horizontal=True, format_func=t)
     params = {"user_email": f"eq.{email}", "order": "visited_on.desc"}
     if periode == "Denne måneden":
         params["month_key"] = f"eq.{month_key()}"
@@ -2394,89 +2703,114 @@ if nav == "Historikk":
         rows = sb_get("visits", "*", params)
     except Exception as exc:
         rows = []
-        st.error(f"Kunne ikke hente: {exc}")
+        st.error(t("Kunne ikke hente:") + f" {exc}")
     tot_km = round(sum(float(r.get("leg_km") or 0) for r in rows), 1)
     tot_co2 = round(sum(float(r.get("co2_g") or 0) for r in rows) / 1000.0, 1)
     m1, m2, m3 = st.columns(3)
-    m1.markdown(f"<div class='bnc-stat'><div class='k'>Besøk</div>"
+    m1.markdown(f"<div class='bnc-stat'><div class='k'>{t('Besøk')}</div>"
                 f"<div class='v'>{len(rows)}</div></div>", unsafe_allow_html=True)
-    m2.markdown(f"<div class='bnc-stat'><div class='k'>Kjørt (km)</div>"
+    m2.markdown(f"<div class='bnc-stat'><div class='k'>{t('Kjørt (km)')}</div>"
                 f"<div class='v'>{tot_km}</div></div>", unsafe_allow_html=True)
-    m3.markdown(f"<div class='bnc-stat'><div class='k'>Klimaavtrykk</div>"
+    m3.markdown(f"<div class='bnc-stat'><div class='k'>{t('Klimaavtrykk')}</div>"
                 f"<div class='v'>{tot_co2} <small>kg CO₂e</small></div></div>", unsafe_allow_html=True)
-    st.caption("Kjøring summeres fra avstanden til hvert registrerte besøk (anslag for "
-               "konsernrapportering). Besøk søkt opp manuelt teller 0 km.")
+    st.caption(t("Kjøring summeres fra avstanden til hvert registrerte besøk (anslag for "
+               "konsernrapportering). Besøk søkt opp manuelt teller 0 km."))
     st.write("")
     _cls = {"Interessert": "b-ok", "Solgt": "b-ok", "Vil tenke": "b-warn",
             "Ikke til stede": "b-no", "Ikke interessert": "b-no"}
     for r in rows:
         cls = _cls.get(r.get("outcome", ""), "")
-        with st.expander(f"{r.get('navn','')}  ·  {r.get('outcome','')}  ·  {r.get('visited_on','')}"):
-            st.markdown(f"<span class='bnc-badge {cls}'>{r.get('outcome','')}</span> "
+        with st.expander(f"{r.get('navn','')}  ·  {t(r.get('outcome',''))}  ·  {r.get('visited_on','')}"):
+            st.markdown(f"<span class='bnc-badge {cls}'>{t(r.get('outcome',''))}</span> "
                         f"<span class='bnc-sub'>{r.get('visited_on','')} · {r.get('kommune','')}</span>",
                         unsafe_allow_html=True)
-            st.write(r.get("report") or "_Ingen rapporttekst._")
+            st.write(r.get("report") or t("_Ingen rapporttekst._"))
             if r.get("contact_email"):
-                st.caption(f"Takk-e-post til: {r.get('contact_email')}")
+                st.caption(t("Takk-e-post til:") + f" {r.get('contact_email')}")
             he1, he2 = st.columns(2)
-            if he1.button("Rediger", key=f"hedit_{r.get('id')}", use_container_width=True):
+            if he1.button(t("Rediger"), key=f"hedit_{r.get('id')}", use_container_width=True):
                 edit_visit_dialog(r)
-            if he2.button("Angre / slett besøk", key=f"hdel_{r.get('id')}",
+            if he2.button(t("Angre / slett besøk"), key=f"hdel_{r.get('id')}",
                           use_container_width=True):
                 try:
                     sb_delete("visits", {"id": f"eq.{r.get('id')}"})
                     user_co2_totals.clear()
-                    st.session_state["_toast"] = "Besøk slettet."
+                    st.session_state["_toast"] = t("Besøk slettet.")
                     st.rerun()
                 except Exception as exc:
                     st.error(f"{exc}")
     if not rows:
-        st.info(f"Ingen besøk i perioden «{periode}».")
+        st.info(t("Ingen besøk i perioden") + f" «{t(periode)}».")
 
 
 # =========================================================== INNSTILLINGER ====
 if nav == "Innstillinger":
-    page_header("Innstillinger", "Profil og standardverdier for planlegging")
+    page_header(t("Innstillinger"), t("Profil og standardverdier for planlegging"))
     with st.container(border=True):
-        st.markdown("**Søkeområde**")
+        st.markdown(t("**Søkeområde**"))
         land_picker("land_set", label_visibility="collapsed",
-                    help="Velg hvilket land bedriftssøk og ruteplanlegging bruker. "
-                         "Sverige henter data fra OpenStreetMap.")
+                    help=t("Velg hvilket land bedriftssøk og ruteplanlegging bruker."))
         _n_land = len(companies)
-        st.caption(f"{_n_land:,} bedrifter i {LAND_NAVN.get(current_land())}."
+        st.caption(f"{_n_land:,} {t('bedrifter i')} {LAND_NAVN.get(current_land())}."
                    .replace(",", " "))
+    with st.container(border=True):
+        st.markdown(t("**Språk**"))
+        _langs = ["no", "sv"]
+        _cl = current_lang()
+        _sel_lang = st.radio(
+            t("**Språk**"), _langs, index=_langs.index(_cl) if _cl in _langs else 0,
+            key="_lang_pick", horizontal=True, label_visibility="collapsed",
+            format_func=lambda x: {"no": "Norsk", "sv": "Svenska"}[x])
+        if _sel_lang != _cl:
+            st.session_state["lang"] = _sel_lang
+            try:
+                st.query_params["lang"] = _sel_lang
+            except Exception:
+                pass
+            # best-effort varig lagring (virker hvis kolonnen «lang» finnes – ellers ignoreres)
+            try:
+                sb_upsert("salesperson_settings",
+                          {"email": email, "lang": _sel_lang,
+                           "updated_at": datetime.now(timezone.utc).isoformat()}, "email")
+            except Exception:
+                pass
+            # nullstill menyvalg lagret med gammel språketikett, og bli værende her
+            for _nk in ("nav_menu", "bnav_menu", "_last_bnav"):
+                st.session_state.pop(_nk, None)
+            st.session_state["_goto"] = "Innstillinger"
+            st.rerun()
     with st.form("settings"):
         c1, c2 = st.columns(2)
         with c1:
             with st.container(border=True):
-                st.markdown("**Selgerprofil**")
-                name = st.text_input("Navn", value=_settings.get("name", ""))
-                phone = st.text_input("Telefon", value=_settings.get("phone", ""), placeholder="+47 …",
-                                      help="Settes automatisk inn i takk-e-posten ({telefon}).")
-                summary_email = st.text_input("E-post for ukesoppsummering",
+                st.markdown(t("**Selgerprofil**"))
+                name = st.text_input(t("Navn"), value=_settings.get("name", ""))
+                phone = st.text_input(t("Telefon"), value=_settings.get("phone", ""), placeholder=t("+47 …"),
+                                      help=t("Settes automatisk inn i takk-e-posten ({telefon})."))
+                summary_email = st.text_input(t("E-post for ukesoppsummering"),
                                               value=_settings.get("summary_email", "") or email,
-                                              help="Hit sendes fredagens ukesoppsummering.")
+                                              help=t("Hit sendes fredagens ukesoppsummering."))
         with c2:
             with st.container(border=True):
-                st.markdown("**Standard for planlegging**")
-                start_label = st.text_input("Fast startposisjon (adresse)",
+                st.markdown(t("**Standard for planlegging**"))
+                start_label = st.text_input(t("Fast startposisjon (adresse)"),
                                             value=_settings.get("start_label", ""),
-                                            placeholder="Valgfritt – kan overstyres på «Min dag»")
+                                            placeholder=t("Valgfritt – kan overstyres på «Min dag»"))
                 cc1, cc2 = st.columns(2)
-                visit_min = cc1.number_input("Snitt pr. besøk (min)", 10, 180,
+                visit_min = cc1.number_input(t("Snitt pr. besøk (min)"), 10, 180,
                                              int(_settings.get("avg_visit_minutes") or 60), 5,
-                                             help="Standardverdi i planleggingen og for "
-                                                  "«Beregnet tid»-anslaget.")
-                speed = cc2.number_input("Snittfart bil (km/t)", 30, 110,
+                                             help=t("Standardverdi i planleggingen og for "
+                                                  "«Beregnet tid»-anslaget."))
+                speed = cc2.number_input(t("Snittfart bil (km/t)"), 30, 110,
                                          int(_settings.get("speed_kmh") or 70), 5,
-                                         help="Brukes til å anslå kjøretid.")
+                                         help=t("Brukes til å anslå kjøretid."))
                 _co2d = _settings.get("co2_g_per_km")
-                co2 = st.number_input("Utslipp (g CO₂e/km)", 0, 400,
+                co2 = st.number_input(t("Utslipp (g CO₂e/km)"), 0, 400,
                                       int(_co2d) if _co2d not in (None, "") else 0, 1,
-                                      help="For konsernrapportering. Helelektrisk (f.eks. BMW iX1) "
-                                           "= 0. Ladbar hybrid ~60, bensin ~165, diesel ~170.")
+                                      help=t("For konsernrapportering. Helelektrisk (f.eks. BMW iX1) "
+                                           "= 0. Ladbar hybrid ~60, bensin ~165, diesel ~170."))
                 hours = float(_settings.get("hours_per_day") or 8)
-        lagre = st.form_submit_button("Lagre innstillinger", type="primary")
+        lagre = st.form_submit_button(t("Lagre innstillinger"), type="primary")
     if lagre:
         lat, lon, label = (_settings.get("start_lat"), _settings.get("start_lon"), start_label)
         if start_label:
@@ -2492,32 +2826,32 @@ if nav == "Innstillinger":
                 "co2_g_per_km": co2,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }, "email")
-            st.success("Lagret." + (f" Startposisjon: {label}." if lat else
-                                       " (Fant ikke adressen – startposisjon ikke satt.)"))
+            st.success(t("Lagret.") + (f" {t('Startposisjon:')} {label}." if lat else
+                                       t(" (Fant ikke adressen – startposisjon ikke satt.)")))
         except Exception as exc:
-            st.error(f"Kunne ikke lagre: {exc}")
+            st.error(t("Kunne ikke lagre:") + f" {exc}")
 
     st.divider()
-    with st.expander("Ekskluderte bedrifter (skjult fra forslag)"):
+    with st.expander(t("Ekskluderte bedrifter (skjult fra forslag)")):
         try:
             ex = sb_get("excluded", "orgnr,navn", {"user_email": f"eq.{email}", "order": "navn.asc"})
         except Exception:
             ex = []
         if not ex:
-            st.caption("Ingen bedrifter er ekskludert.")
+            st.caption(t("Ingen bedrifter er ekskludert."))
         else:
             if st.button(f"Angre alle ({len(ex)})", key="unx_all",
-                         help="Fjern alle fra ekskludert-lista – de kan foreslås igjen"):
+                         help=t("Fjern alle fra ekskludert-lista – de kan foreslås igjen")):
                 try:
                     sb_delete("excluded", {"user_email": f"eq.{email}"})
-                    st.session_state["_toast"] = "Alle ekskluderte bedrifter er gjenåpnet."
+                    st.session_state["_toast"] = t("Alle ekskluderte bedrifter er gjenåpnet.")
                     st.rerun()
                 except Exception as exc:
                     st.error(f"{exc}")
         for e in ex:
             xc = st.columns([5, 2])
             xc[0].write(f"{e.get('navn','')}  ({e.get('orgnr','')})")
-            if xc[1].button("Angre", key=f"unx_{e.get('orgnr')}", use_container_width=True):
+            if xc[1].button(t("Angre"), key=f"unx_{e.get('orgnr')}", use_container_width=True):
                 try:
                     unexclude(email, e.get("orgnr"))
                     st.rerun()
@@ -2525,18 +2859,18 @@ if nav == "Innstillinger":
                     st.error(f"{exc}")
 
     st.divider()
-    st.caption("Du kommer inn via din personlige lenke. Legg appen til på Hjem-skjerm på "
-               "mobilen (del-knappen → «Legg til på Hjem-skjerm») – da åpner snarveien rett inn.")
+    st.caption(t("Du kommer inn via din personlige lenke. Legg appen til på Hjem-skjerm på "
+               "mobilen (del-knappen → «Legg til på Hjem-skjerm») – da åpner snarveien rett inn."))
 
 
 # =============================================================== BRUKERE =======
 if nav == "Brukere" and is_admin:
     import secrets as _secrets
-    page_header("Brukere", "Opprett selgere og gi dem personlig innloggingslenke")
+    page_header(t("Brukere"), t("Opprett selgere og gi dem personlig innloggingslenke"))
 
-    with st.expander("Klimaavtrykk pr. selger", expanded=True):
-        perc = st.radio("Periode", ["Denne måneden", "Hittil i år", "Alt"],
-                        horizontal=True, key="adm_co2_per")
+    with st.expander(t("Klimaavtrykk pr. selger"), expanded=True):
+        perc = st.radio(t("Periode"), ["Denne måneden", "Hittil i år", "Alt"],
+                        horizontal=True, key="adm_co2_per", format_func=t)
         prm = {"user_email": "not.is.null"}
         if perc == "Denne måneden":
             prm["month_key"] = f"eq.{month_key()}"
@@ -2546,7 +2880,7 @@ if nav == "Brukere" and is_admin:
             vr = sb_get("visits", "user_email,co2_g,leg_km,visited_on,month_key", prm)
         except Exception as exc:
             vr = []
-            st.error(f"Kunne ikke hente: {exc}")
+            st.error(t("Kunne ikke hente:") + f" {exc}")
         names = {}
         try:
             for u in sb_get("salesperson_settings", "email,name"):
@@ -2560,20 +2894,20 @@ if nav == "Brukere" and is_admin:
             a["km"] += float(r.get("leg_km") or 0)
             a["co2"] += float(r.get("co2_g") or 0)
         if not agg:
-            st.caption("Ingen registrerte besøk i perioden.")
+            st.caption(t("Ingen registrerte besøk i perioden."))
         else:
             a1, a2, a3 = st.columns(3)
-            a1.markdown(f"<div class='bnc-stat'><div class='k'>Selgere</div>"
+            a1.markdown(f"<div class='bnc-stat'><div class='k'>{t('Selgere')}</div>"
                         f"<div class='v'>{len(agg)}</div></div>", unsafe_allow_html=True)
-            a2.markdown(f"<div class='bnc-stat'><div class='k'>Kjørt (km)</div>"
+            a2.markdown(f"<div class='bnc-stat'><div class='k'>{t('Kjørt (km)')}</div>"
                         f"<div class='v'>{round(sum(a['km'] for a in agg.values()), 1)}</div></div>",
                         unsafe_allow_html=True)
-            a3.markdown(f"<div class='bnc-stat'><div class='k'>Totalt CO₂e</div>"
+            a3.markdown(f"<div class='bnc-stat'><div class='k'>{t('Totalt CO₂e')}</div>"
                         f"<div class='v'>{round(sum(a['co2'] for a in agg.values()) / 1000, 1)} "
                         f"<small>kg</small></div></div>", unsafe_allow_html=True)
             st.write("")
             for u, a in sorted(agg.items(), key=lambda x: -x[1]["co2"]):
-                st.markdown(f"- **{names.get(u, u)}** — {a['n']} besøk · {round(a['km'], 1)} km · "
+                st.markdown(f"- **{names.get(u, u)}** — {a['n']} {t('besøk')} · {round(a['km'], 1)} km · "
                             f"**{round(a['co2'] / 1000, 1)} kg CO₂e**")
 
     def personal_link(u):
@@ -2586,40 +2920,40 @@ if nav == "Brukere" and is_admin:
     c1, c2 = st.columns([1, 2])
     with c1:
         with st.container(border=True):
-            st.markdown("**Ny bruker**")
+            st.markdown(t("**Ny bruker**"))
             with st.form("ny_bruker"):
-                bn = st.text_input("Navn", placeholder="Kim Werner Strand")
-                be = st.text_input("E-post", placeholder="kim@bncnordic.no").strip().lower()
-                if st.form_submit_button("Opprett / ny lenke", type="primary", use_container_width=True):
+                bn = st.text_input(t("Navn"), placeholder=t("Kim Werner Strand"))
+                be = st.text_input(t("E-post"), placeholder=t("kim@bncnordic.no")).strip().lower()
+                if st.form_submit_button(t("Opprett / ny lenke"), type="primary", use_container_width=True):
                     if be:
                         try:
                             sb_upsert("salesperson_settings", {
                                 "email": be, "name": bn, "login_token": _secrets.token_urlsafe(12),
                                 "updated_at": datetime.now(timezone.utc).isoformat()}, "email")
-                            st.success("Bruker klar – lenken vises til høyre.")
+                            st.success(t("Bruker klar – lenken vises til høyre."))
                         except Exception as exc:
-                            st.error(f"Kunne ikke lagre: {exc}")
+                            st.error(t("Kunne ikke lagre:") + f" {exc}")
                     else:
                         st.error("Skriv inn e-post.")
     with c2:
         if not APP_BASE_URL:
-            st.warning("Legg **APP_BASE_URL** i Streamlit Secrets (appens adresse) for komplette lenker.")
+            st.warning(t("Legg **APP_BASE_URL** i Streamlit Secrets (appens adresse) for komplette lenker."))
         try:
             users = sb_get("salesperson_settings", "email,name,login_token", {"order": "email.asc"})
         except Exception as exc:
             users = []
-            st.error(f"Kunne ikke hente brukere: {exc}")
+            st.error(t("Kunne ikke hente brukere:") + f" {exc}")
         for u in users:
             with st.container(border=True):
                 tag = " · admin" if u["email"] in ADMIN_EMAILS else ""
-                st.markdown(f"**{u.get('name') or '(uten navn)'}** — {u['email']}{tag}")
+                st.markdown(f"**{u.get('name') or t('(uten navn)')}** — {u['email']}{tag}")
                 link = personal_link(u)
                 if link:
                     st.code(link, language=None)
                 else:
-                    st.caption("Ingen lenke ennå – trykk «Ny lenke».")
+                    st.caption(t("Ingen lenke ennå – trykk «Ny lenke»."))
                 bc = st.columns(2)
-                if bc[0].button("Ny lenke", key=f"nl_{u['email']}", use_container_width=True):
+                if bc[0].button(t("Ny lenke"), key=f"nl_{u['email']}", use_container_width=True):
                     try:
                         sb_upsert("salesperson_settings", {
                             "email": u["email"], "login_token": _secrets.token_urlsafe(12),
@@ -2628,7 +2962,7 @@ if nav == "Brukere" and is_admin:
                     except Exception as exc:
                         st.error(f"{exc}")
                 if u["email"] not in ADMIN_EMAILS:
-                    if bc[1].button("Steng lenke", key=f"rv_{u['email']}", use_container_width=True):
+                    if bc[1].button(t("Steng lenke"), key=f"rv_{u['email']}", use_container_width=True):
                         try:
                             sb_upsert("salesperson_settings", {
                                 "email": u["email"], "login_token": None,
@@ -2640,30 +2974,30 @@ if nav == "Brukere" and is_admin:
 
 # ========================================================= E-POSTINNHOLD =======
 if nav == "E-postinnhold" and is_admin:
-    page_header("E-postinnhold", "Rediger de automatiske e-postene. Selgerne ser ikke denne siden.")
+    page_header(t("E-postinnhold"), t("Rediger de automatiske e-postene. Selgerne ser ikke denne siden."))
     for kind in ("thankyou", "summary", "report"):
         d = DEFAULT_CONTENT[kind]
         cur = get_content(kind)
         with st.expander(d["label"], expanded=(kind == "thankyou")):
             with st.form(f"ec_{kind}"):
-                subj = st.text_input("Emne", value=cur["subject"])
-                body = st.text_area("Tekst", value=cur["body"], height=260)
+                subj = st.text_input(t("Emne"), value=cur["subject"])
+                body = st.text_area(t("Tekst"), value=cur["body"], height=260)
                 st.caption(f"Variabler som fylles automatisk: {d['vars']}")
-                if st.form_submit_button("Lagre", type="primary"):
+                if st.form_submit_button(t("Lagre"), type="primary"):
                     try:
                         sb_upsert("email_content", {
                             "kind": kind, "subject": subj, "body": body,
                             "updated_at": datetime.now(timezone.utc).isoformat()}, "kind")
-                        st.success("Lagret.")
+                        st.success(t("Lagret."))
                     except Exception as exc:
-                        st.error(f"Kunne ikke lagre: {exc}")
+                        st.error(t("Kunne ikke lagre:") + f" {exc}")
 
     st.divider()
-    with st.expander("Send testmail (kontroll før lansering)"):
-        st.caption("Legger en test i kø og sendes av E-postjobben (kjør den i GitHub Actions "
-                   "eller vent inntil 1 time).")
-        tt_to = st.text_input("Send test til", value=email, key="tt_to")
-        tt_kind = st.selectbox("Type", ["thankyou", "summary", "report"],
+    with st.expander(t("Send testmail (kontroll før lansering)")):
+        st.caption(t("Legger en test i kø og sendes av E-postjobben (kjør den i GitHub Actions "
+                   "eller vent inntil 1 time)."))
+        tt_to = st.text_input(t("Send test til"), value=email, key="tt_to")
+        tt_kind = st.selectbox(t("Type"), ["thankyou", "summary", "report"],
                                format_func=lambda k: DEFAULT_CONTENT[k]["label"], key="tt_kind")
         cur = get_content(tt_kind)
         if tt_kind == "thankyou":
@@ -2682,19 +3016,19 @@ if nav == "E-postinnhold" and is_admin:
                     "utfall": "Interessert", "km": "12,4", "co2": "0,16",
                     "rapport": "Testrapport for å kontrollere formatet."}
             tsub, tbody = apply_vars(cur["subject"], demo), apply_vars(cur["body"], demo)
-        st.caption("Forhåndsvisning:")
+        st.caption(t("Forhåndsvisning:"))
         st.code(tsub, language=None)
         st.text(tbody)
-        if st.button("Legg testmail i kø"):
+        if st.button(t("Legg testmail i kø")):
             try:
                 sb_insert("email_queue", {
                     "kind": tt_kind, "to_email": tt_to.strip(),
                     "subject": "[TEST] " + tsub, "body": tbody,
                     "send_after": date.today().isoformat(), "payload": {"test": True}})
-                st.success(f"Testmail lagt i kø til {tt_to.strip()}. Kjør «E-postjobb» i "
-                           "GitHub Actions for å sende nå.")
+                st.success(t("Testmail lagt i kø til") + f" {tt_to.strip()}. "
+                           + t("Kjør «E-postjobb» i GitHub Actions for å sende nå."))
             except Exception as exc:
-                st.error(f"Kunne ikke legge i kø: {exc}")
+                st.error(t("Kunne ikke legge i kø:") + f" {exc}")
 
 
 # ====================================================== MOBIL: TOPP + BUNNMENY =
@@ -2703,7 +3037,7 @@ with st.container(key="bnc_topbar"):
     tb = st.columns([5, 2])
     with tb[0]:
         _logo(LOGO_WHITE, 92)
-    if tb[1].button("Logg ut", key="top_out", use_container_width=True):
+    if tb[1].button(t("Logg ut"), key="top_out", use_container_width=True):
         st.query_params.clear()
         for _k in list(st.session_state.keys()):
             st.session_state.pop(_k, None)
@@ -2711,10 +3045,11 @@ with st.container(key="bnc_topbar"):
 
 with st.container(key="bnc_bnav"):
     _bpages = ["Min dag", "Drop-in", "Planlegging", "Historikk", "Innstillinger"]
+    _blabels = [t(p) for p in _bpages]
     if HAS_OPTION_MENU:
         _bidx = _bpages.index(nav) if nav in _bpages else 0
         _bsel = option_menu(
-            None, _bpages, icons=[PAGE_ICONS[p] for p in _bpages],
+            None, _blabels, icons=[PAGE_ICONS[p] for p in _bpages],
             orientation="horizontal", default_index=_bidx, key="bnav_menu",
             styles={
                 "container": {"background-color": "#ffffff", "padding": "0!important"},
@@ -2724,15 +3059,16 @@ with st.container(key="bnc_bnav"):
                 "nav-link-selected": {"background-color": "#eef2f8", "color": "#1b2a4a"},
                 "icon": {"font-size": "17px", "display": "block", "margin": "0 0 2px 0"},
             })
+        _bselpage = _bpages[_blabels.index(_bsel)] if _bsel in _blabels else nav
         if _bsel != st.session_state.get("_last_bnav"):
             st.session_state["_last_bnav"] = _bsel
-            if _bsel != nav:
-                st.session_state["_goto"] = _bsel
+            if _bselpage != nav:
+                st.session_state["_goto"] = _bselpage
                 st.rerun()
     else:
         _bc = st.columns(len(_bpages))
         for _i, _pg in enumerate(_bpages):
-            if _bc[_i].button(_pg, key=f"bn_{_pg}", use_container_width=True,
+            if _bc[_i].button(t(_pg), key=f"bn_{_pg}", use_container_width=True,
                               type=("primary" if nav == _pg else "secondary")):
                 st.session_state["_goto"] = _pg
                 st.rerun()
