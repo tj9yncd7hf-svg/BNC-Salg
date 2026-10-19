@@ -260,6 +260,8 @@ _SV = {
     # Historikk
     "Dine besøk og klimaavtrykk": "Dina besök och klimatavtryck", "Periode": "Period",
     "Vis besøk for": "Visa besök för", "Alle selgere": "Alla säljare", "Meg": "Jag",
+    "Stopp takk-e-posten": "Stoppa tack-e-posten", "Takk-e-posten er stoppet.": "Tack-e-posten är stoppad.",
+    "ikke sendt ennå": "inte skickat ännu",
     "Denne måneden": "Denna månad", "Hittil i år": "Hittills i år", "Alt": "Allt",
     "Besøk": "Besök", "Kjørt (km)": "Kört (km)",
     "Kjøring summeres fra avstanden til hvert registrerte besøk (anslag for konsernrapportering). "
@@ -2849,6 +2851,14 @@ if nav == "Historikk":
     _cls = {"Interessert": "b-ok", "Solgt": "b-ok", "Vil tenke": "b-warn",
             "Ikke til stede": "b-no", "Ikke interessert": "b-no"}
     _show_seller = is_admin and sel_user == "__ALL__"
+    # Ventende «takk for praten»-e-poster (kan stoppes før de sendes).
+    pending_thanks = {}
+    try:
+        for _pt in sb_get("email_queue", "id,to_email,send_after",
+                          {"kind": "eq.thankyou", "status": "eq.pending"}):
+            pending_thanks[(_pt.get("to_email"), str(_pt.get("send_after")))] = _pt.get("id")
+    except Exception:
+        pending_thanks = {}
     for r in rows:
         cls = _cls.get(r.get("outcome", ""), "")
         _seller = hist_names.get(r.get("user_email", ""), r.get("user_email", ""))
@@ -2862,7 +2872,23 @@ if nav == "Historikk":
                         unsafe_allow_html=True)
             st.write(r.get("report") or t("_Ingen rapporttekst._"))
             if r.get("contact_email"):
-                st.caption(t("Takk-e-post til:") + f" {r.get('contact_email')}")
+                try:
+                    _exp_send = add_business_days(date.fromisoformat(r.get("visited_on")), 2).isoformat()
+                except Exception:
+                    _exp_send = None
+                _qid = pending_thanks.get((r.get("contact_email"), _exp_send))
+                if _qid:
+                    st.caption(t("Takk-e-post til:") + f" {r.get('contact_email')} · " + t("ikke sendt ennå"))
+                    if st.button(t("Stopp takk-e-posten"), key=f"stopmail_{r.get('id')}",
+                                 use_container_width=True):
+                        try:
+                            sb_update("email_queue", {"id": f"eq.{_qid}"}, {"status": "cancelled"})
+                            st.session_state["_toast"] = t("Takk-e-posten er stoppet.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"{exc}")
+                else:
+                    st.caption(t("Takk-e-post til:") + f" {r.get('contact_email')}")
             he1, he2 = st.columns(2)
             if he1.button(t("Rediger"), key=f"hedit_{r.get('id')}", use_container_width=True):
                 edit_visit_dialog(r)
