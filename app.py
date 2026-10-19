@@ -779,6 +779,19 @@ def companies_for(land):
     return comps
 
 
+@st.cache_data(ttl=21600, show_spinner=False)
+def all_companies():
+    """Begge lands bedrifter samlet (med «_land»-merke) – brukes til Drop-in, så
+    selgeren kan søke opp en bedrift i begge land uten å bytte søkeområde."""
+    out = []
+    for ld in ("NO", "SE"):
+        for c in companies_for(ld):
+            d = dict(c)
+            d["_land"] = ld
+            out.append(d)
+    return out
+
+
 def current_land():
     return st.session_state.get("land", "NO")
 
@@ -2282,14 +2295,15 @@ if nav == "Drop-in":
                 return True
             return bool(qd and len(qd) >= 3 and qd in str(c.get("orgnr", "")))
 
-        hits = [c for c in companies if _match(c)][:25]
+        hits = [c for c in all_companies() if _match(c)][:25]
         if not hits:
             st.caption(t("Ingen treff. Prøv færre ord, eller søk på org./bedr.nr."))
         for c in hits:
             cc = st.columns([5, 2])
+            _landtag = (" · " + LAND_NAVN.get(c.get("_land"), "")) if c.get("_land") else ""
             cc[0].markdown(f"**{c.get('navn','')}**  \n"
                            f"<span class='bnc-sub'>{c.get('kategori','')} · "
-                           f"{c.get('poststed','')} · nr {c.get('orgnr','')}</span>",
+                           f"{c.get('poststed','')}{_landtag} · nr {c.get('orgnr','')}</span>",
                            unsafe_allow_html=True)
             if cc[1].button(t("Registrer"), key=f"d_{c.get('orgnr')}", use_container_width=True):
                 register_dialog(c)
