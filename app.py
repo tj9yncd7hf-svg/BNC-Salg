@@ -265,6 +265,7 @@ _SV = {
     "Søk i lista": "Sök i listan", "Bedrift, org.nr eller kommune …": "Företag, org.nr eller kommun …",
     "besøkt": "besökt", "ganger": "gånger", "gang": "gång",
     "Besøkt her": "Besökt här", "totalt": "totalt",
+    "Kundens e-post:": "Kundens e-post:", "(kun registrert)": "(endast registrerad)",
     "Denne måneden": "Denna månad", "Hittil i år": "Hittills i år", "Alt": "Allt",
     "Besøk": "Besök", "Kjørt (km)": "Kört (km)",
     "Kjøring summeres fra avstanden til hvert registrerte besøk (anslag for konsernrapportering). "
@@ -412,10 +413,11 @@ DEFAULT_CONTENT = {
             "Adresse: {adresse}\n"
             "Dato: {dato}\n"
             "Utfall: {utfall}\n"
+            "Kunde-e-post: {kundeepost}\n"
             "Kjøring til besøket: {km} km (~{co2} kg CO₂e)\n\n"
             "Rapport:\n{rapport}\n"
         ),
-        "vars": "{selger}, {bedrift}, {orgnr}, {adresse}, {dato}, {utfall}, {rapport}, {km}, {co2}",
+        "vars": "{selger}, {bedrift}, {orgnr}, {adresse}, {dato}, {utfall}, {kundeepost}, {rapport}, {km}, {co2}",
         "label": "Besøksrapport (til backoffice, samme dag)",
     },
 }
@@ -460,6 +462,7 @@ DEFAULT_CONTENT_SV = {
             "Adress: {adresse}\n"
             "Datum: {dato}\n"
             "Utfall: {utfall}\n"
+            "Kund-e-post: {kundeepost}\n"
             "Körning till besöket: {km} km (~{co2} kg CO₂e)\n\n"
             "Rapport:\n{rapport}\n"
         ),
@@ -1725,20 +1728,27 @@ def register_dialog(company):
             today = date.today()
             leg_km = round(float(company.get("leg_km") or 0), 1)
             co2g = round(leg_km * co2_factor(_settings), 1)
-            sb_insert("visits", {
+            _thanks = bool(send_thanks and contact)
+            _vrow = {
                 "user_email": email, "orgnr": str(company.get("orgnr")),
                 "navn": company.get("navn", ""), "kommune": company.get("kommune", ""),
                 "visited_on": today.isoformat(), "month_key": month_key(today),
                 "report": report, "outcome": outcome, "contact_email": contact,
-                "leg_km": leg_km, "co2_g": co2g,
-            })
+                "leg_km": leg_km, "co2_g": co2g, "thanks_sent": _thanks,
+            }
+            try:
+                sb_insert("visits", _vrow)
+            except Exception:
+                # «thanks_sent»-kolonnen finnes kanskje ikke ennå
+                sb_insert("visits", {k: v for k, v in _vrow.items() if k != "thanks_sent"})
             _mlang = current_lang()   # selgerens språk styrer e-post + avsender
             rc = get_content("report", _mlang)
             rmap = {"selger": email, "bedrift": company.get("navn", ""),
                     "orgnr": company.get("orgnr", ""),
                     "adresse": f"{company.get('adresse','')}, {company.get('postnr','')} {company.get('poststed','')}",
                     "dato": today.isoformat(), "utfall": outcome, "rapport": report,
-                    "km": leg_km, "co2": co2_kg(leg_km, _settings)}
+                    "km": leg_km, "co2": co2_kg(leg_km, _settings),
+                    "kundeepost": contact or "—"}
             enqueue_email({
                 "kind": "report", "to_email": BACKOFFICE_EMAIL, "lang": _mlang,
                 "subject": apply_vars(rc["subject"], rmap),
@@ -2914,23 +2924,27 @@ if nav == "Historikk":
                            + t("totalt"))
             st.write(r.get("report") or t("_Ingen rapporttekst._"))
             if r.get("contact_email"):
-                try:
-                    _exp_send = add_business_days(date.fromisoformat(r.get("visited_on")), 2).isoformat()
-                except Exception:
-                    _exp_send = None
-                _qid = pending_thanks.get((r.get("contact_email"), _exp_send))
-                if _qid:
-                    st.caption(t("Takk-e-post til:") + f" {r.get('contact_email')} · " + t("ikke sendt ennå"))
-                    if st.button(t("Stopp takk-e-posten"), key=f"stopmail_{r.get('id')}",
-                                 use_container_width=True):
-                        try:
-                            sb_update("email_queue", {"id": f"eq.{_qid}"}, {"status": "cancelled"})
-                            st.session_state["_toast"] = t("Takk-e-posten er stoppet.")
-                            st.rerun()
-                        except Exception as exc:
-                            st.error(f"{exc}")
+                if r.get("thanks_sent"):
+                    try:
+                        _exp_send = add_business_days(date.fromisoformat(r.get("visited_on")), 2).isoformat()
+                    except Exception:
+                        _exp_send = None
+                    _qid = pending_thanks.get((r.get("contact_email"), _exp_send))
+                    if _qid:
+                        st.caption(t("Takk-e-post til:") + f" {r.get('contact_email')} · " + t("ikke sendt ennå"))
+                        if st.button(t("Stopp takk-e-posten"), key=f"stopmail_{r.get('id')}",
+                                     use_container_width=True):
+                            try:
+                                sb_update("email_queue", {"id": f"eq.{_qid}"}, {"status": "cancelled"})
+                                st.session_state["_toast"] = t("Takk-e-posten er stoppet.")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"{exc}")
+                    else:
+                        st.caption(t("Takk-e-post til:") + f" {r.get('contact_email')}")
                 else:
-                    st.caption(t("Takk-e-post til:") + f" {r.get('contact_email')}")
+                    # E-post registrert kun for oppfølging – ingen takk-mail er sendt.
+                    st.caption(t("Kundens e-post:") + f" {r.get('contact_email')} · " + t("(kun registrert)"))
             he1, he2 = st.columns(2)
             if he1.button(t("Rediger"), key=f"hedit_{r.get('id')}", use_container_width=True):
                 edit_visit_dialog(r)
