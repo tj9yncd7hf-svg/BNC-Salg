@@ -259,6 +259,7 @@ _SV = {
     "Slett ruten": "Radera rutten",
     # Historikk
     "Dine besøk og klimaavtrykk": "Dina besök och klimatavtryck", "Periode": "Period",
+    "Vis besøk for": "Visa besök för", "Alle selgere": "Alla säljare", "Meg": "Jag",
     "Denne måneden": "Denna månad", "Hittil i år": "Hittills i år", "Alt": "Allt",
     "Besøk": "Besök", "Kjørt (km)": "Kört (km)",
     "Kjøring summeres fra avstanden til hvert registrerte besøk (anslag for konsernrapportering). "
@@ -2799,8 +2800,31 @@ if nav == "Planlegging":
 # ============================================================= HISTORIKK ======
 if nav == "Historikk":
     page_header(t("Historikk"), t("Dine besøk og klimaavtrykk"))
+    # Admin kan se besøk for andre selgere (eller alle).
+    sel_user = email
+    hist_names = {}
+    if is_admin:
+        try:
+            _allu = sb_get("salesperson_settings", "email,name", {"order": "name.asc"})
+        except Exception:
+            _allu = []
+        hist_names = {u["email"]: (u.get("name") or u["email"]) for u in _allu}
+        _opts, _seen = [], set()
+        for o in ["__ALL__", email] + [u["email"] for u in _allu]:
+            if o not in _seen:
+                _seen.add(o)
+                _opts.append(o)
+
+        def _hist_lbl(o):
+            if o == "__ALL__":
+                return t("Alle selgere")
+            if o == email:
+                return t("Meg") + f" ({hist_names.get(email, email)})"
+            return hist_names.get(o, o)
+        sel_user = st.selectbox(t("Vis besøk for"), _opts, format_func=_hist_lbl, key="hist_user")
     periode = st.radio(t("Periode"), ["Denne måneden", "Hittil i år", "Alt"], horizontal=True, format_func=t)
-    params = {"user_email": f"eq.{email}", "order": "visited_on.desc"}
+    params = {"order": "visited_on.desc"}
+    params["user_email"] = "not.is.null" if sel_user == "__ALL__" else f"eq.{sel_user}"
     if periode == "Denne måneden":
         params["month_key"] = f"eq.{month_key()}"
     elif periode == "Hittil i år":
@@ -2824,11 +2848,17 @@ if nav == "Historikk":
     st.write("")
     _cls = {"Interessert": "b-ok", "Solgt": "b-ok", "Vil tenke": "b-warn",
             "Ikke til stede": "b-no", "Ikke interessert": "b-no"}
+    _show_seller = is_admin and sel_user == "__ALL__"
     for r in rows:
         cls = _cls.get(r.get("outcome", ""), "")
-        with st.expander(f"{r.get('navn','')}  ·  {t(r.get('outcome',''))}  ·  {r.get('visited_on','')}"):
+        _seller = hist_names.get(r.get("user_email", ""), r.get("user_email", ""))
+        _exp = f"{r.get('navn','')}  ·  {t(r.get('outcome',''))}  ·  {r.get('visited_on','')}"
+        if _show_seller:
+            _exp += f"  ·  {_seller}"
+        with st.expander(_exp):
             st.markdown(f"<span class='bnc-badge {cls}'>{t(r.get('outcome',''))}</span> "
-                        f"<span class='bnc-sub'>{r.get('visited_on','')} · {r.get('kommune','')}</span>",
+                        f"<span class='bnc-sub'>{r.get('visited_on','')} · {r.get('kommune','')}"
+                        + (f" · {_seller}" if _show_seller else "") + "</span>",
                         unsafe_allow_html=True)
             st.write(r.get("report") or t("_Ingen rapporttekst._"))
             if r.get("contact_email"):
