@@ -813,15 +813,9 @@ def google_q(c):
     return "https://www.google.com/search?q=" + urllib.parse.quote_plus(c.get("navn", ""))
 
 
-def geocode(text, land=None):
-    """Startpunkt: 1) adresse, 2) stedsnavn, 3) POI (Nominatim). Dekker «gate nr,
-    sted», «Molde lufthavn» og dagligtale som «molde flyplass».
-    For Sverige (land=SE) brukes Nominatim mot svenske adresser/steder."""
-    t = (text or "").strip()
-    if not t:
-        return None, None, text
-    if land is None:
-        land = current_land()
+def _geocode_one(t, land):
+    """Geokod i ett land. Returnerer (lat, lon, label) eller None.
+    NO: adresse → stedsnavn → POI (Kartverket/Nominatim). SE: Photon + Nominatim."""
     if land == "SE":
         ua = {"User-Agent": "BNC-Selger/1.0 (post@bncnordic.no)"}
         # 1) Photon (server-vennlig, tåler ø/ä/ö). Velg første svenske treff.
@@ -853,7 +847,8 @@ def geocode(text, land=None):
                             js[0].get("display_name", qq).split(",")[0] or qq)
             except Exception:
                 pass
-        return None, None, text
+        return None
+
     def _adr():
         r = requests.get("https://ws.geonorge.no/adresser/v1/sok",
                          params={"sok": t, "treffPerSide": 1, "utkoordsys": 4258}, timeout=15)
@@ -895,7 +890,23 @@ def geocode(text, land=None):
                 return res
         except Exception:
             pass
-    return None, None, text
+    return None
+
+
+def geocode(text, land=None, fallback=True):
+    """Finn koordinater for et sted/adresse. Prøver valgt land først, og – om intet
+    treff – det andre landet. Slik finnes f.eks. en norsk startadresse selv om
+    søkeområdet (bedriftslista) er satt til Sverige. «land» styrer kun hvilke
+    bedrifter som foreslås, ikke hvor man kan starte/reise fra."""
+    t = (text or "").strip()
+    if not t:
+        return None, None, text
+    if land is None:
+        land = current_land()
+    res = _geocode_one(t, land)
+    if not res and fallback:
+        res = _geocode_one(t, "NO" if land == "SE" else "SE")
+    return res if res else (None, None, text)
 
 
 def add_business_days(d, n):
@@ -3036,10 +3047,8 @@ if nav == "Innstillinger":
     if lagre:
         lat, lon, label = (_settings.get("start_lat"), _settings.get("start_lon"), start_label)
         if start_label:
+            # geocode() finner basen i begge land, uavhengig av valgt søkeområde.
             _la, _lo, _lb = geocode(start_label)
-            if not _la:
-                # Basen kan ligge i et annet land enn søkeområdet – prøv det andre også.
-                _la, _lo, _lb = geocode(start_label, "NO" if current_land() == "SE" else "SE")
             if _la:
                 lat, lon, label = _la, _lo, _lb
         try:
