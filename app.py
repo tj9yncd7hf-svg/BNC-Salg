@@ -720,6 +720,47 @@ def load_companies(land="NO"):
 
 
 DITEC_CMS_TOKEN = _secret("DITEC_CMS_API_TOKEN")
+QUICK3_BASE_URL = _secret("QUICK3_BASE_URL").rstrip("/")
+QUICK3_TOKEN = _secret("QUICK3_TOKEN")
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def fetch_ditec_operators():
+    """Driftsselskap (firmanavn) pr. Ditec-senter, fra Quick3 (CRM). Nøkkel er
+    senternavnet normalisert («ditec mölndal»), matchet mot CMS-navnet. Firmanavnet
+    ligger i Quick3-feltet `company`, koblet til senteret via `firstName`
+    («Ditec <senter>»). Tom dict ved manglende nøkkel/feil (da vises bare senternavn)."""
+    if not (QUICK3_BASE_URL and QUICK3_TOKEN):
+        return {}
+    out, offset = {}, 0
+    try:
+        while offset < 5000:
+            r = requests.get(f"{QUICK3_BASE_URL}/api/v2/customer",
+                             params={"searchString": "ditec", "limit": 1000, "offset": offset},
+                             headers={"Authorization": f"Token token={QUICK3_TOKEN}",
+                                      "Accept": "application/json"}, timeout=30)
+            r.raise_for_status()
+            d = r.json()
+            rows = d.get("results") if isinstance(d, dict) else d
+            if not rows:
+                break
+            # Noen sentre heter litt annerledes i Quick3 enn i CMS.
+            _alias = {"ditec vellinge": "ditec vellinge syd", "ditec örebro": "ditec örebro nord"}
+            for c in rows:
+                fn = str(c.get("firstName") or "").strip()
+                comp = str(c.get("company") or "").strip()
+                if fn.lower().startswith("ditec") and comp:
+                    key = " ".join(fn.split()).casefold()
+                    out.setdefault(key, comp)
+                    if key in _alias:
+                        out.setdefault(_alias[key], comp)
+            total = d.get("totalCount") if isinstance(d, dict) else None
+            offset += 1000
+            if len(rows) < 1000 or (total is not None and offset >= int(total)):
+                break
+    except Exception:
+        return {}
+    return out
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
@@ -757,9 +798,14 @@ def _merge_ditec(comps):
     """Legg de aktive Ditec-sentrene (fra CMS) inn som egne poster («Ditec <sted>»).
     Vi stoler kun på CMS-et – ingen SCB-bedrift merkes «(Ditec)» ut fra nærhet, for
     det ga falske treff på naboer (f.eks. et verksted i samme bygg) som ikke er Ditec."""
+    ops = fetch_ditec_operators()
     for ct in fetch_ditec_centers():
+        navn = (ct["name"] or "").strip()
+        comp = ops.get(" ".join(navn.split()).casefold())
+        if comp and comp.casefold() not in navn.casefold():
+            navn = navn + " – " + comp   # «Ditec Mölndal – DM Bilvård AB»
         comps.append({"orgnr": "ditec-" + str(ct["slug"]), "parent_orgnr": "",
-                      "navn": ct["name"], "orgform": "", "bransje_kode": "",
+                      "navn": navn, "orgform": "", "bransje_kode": "",
                       "bransje": "Ditec-senter", "kategori": "Bilpleie",
                       "adresse": ct["adresse"], "postnr": ct["postnr"],
                       "poststed": ct["poststed"], "kommune": "",
