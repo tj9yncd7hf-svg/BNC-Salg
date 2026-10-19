@@ -320,6 +320,78 @@ def load_companies(land="NO"):
     return [c for c in data if c.get("lat") is not None and c.get("lon") is not None]
 
 
+DITEC_CMS_TOKEN = _secret("DITEC_CMS_API_TOKEN")
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def fetch_ditec_centers():
+    """Aktive Ditec-sentre (Sverige) direkte fra Payload-CMS (cms.ditec.se), med
+    koordinater. Mellomlagret 6 t. Tom liste ved feil / manglende nøkkel."""
+    if not DITEC_CMS_TOKEN:
+        return []
+    try:
+        r = requests.get("https://cms.ditec.se/api/centers",
+                         params={"limit": 300, "depth": 0},
+                         headers={"Authorization": f"users API-Key {DITEC_CMS_TOKEN}",
+                                  "Accept": "application/json"}, timeout=20)
+        docs = (r.json() or {}).get("docs") or []
+    except Exception:
+        return []
+    out = []
+    for c in docs:
+        if str(c.get("status", "")).lower() != "active":
+            continue
+        co = c.get("coordinates")
+        if not (isinstance(co, list) and len(co) == 2 and co[0] and co[1]):
+            continue
+        a = c.get("address") or {}
+        out.append({"name": (c.get("name") or "").strip(), "slug": c.get("slug") or "",
+                    "lat": float(co[0]), "lon": float(co[1]),
+                    "adresse": (a.get("street") or "").strip(),
+                    "postnr": str(a.get("zip") or "").replace(" ", ""),
+                    "poststed": a.get("city") or "", "mobil": c.get("phoneNumber") or "",
+                    "epost": c.get("emailAddress") or ""})
+    return out
+
+
+def _merge_ditec(comps):
+    """Merk nærmeste SCB-bedrift (innen 60 m) med «(Ditec)», eller legg til senteret
+    som egen post hvis det ikke finnes i SCB. Koordinatene kommer fra CMS-et."""
+    centers = fetch_ditec_centers()
+    for ct in centers:
+        best, bestd = None, 1e9
+        for c in comps:
+            if c.get("lat") is None:
+                continue
+            d = routing.haversine_km(ct["lat"], ct["lon"], c["lat"], c["lon"])
+            if d < bestd:
+                bestd, best = d, c
+        if best and bestd <= 0.06:   # ≤60 m – samme sted, dette er driftsselskapet
+            if "(Ditec)" not in best["navn"]:
+                best["navn"] = best["navn"].rstrip() + " (Ditec)"
+            best["ditec"] = True
+        else:
+            comps.append({"orgnr": "ditec-" + str(ct["slug"]), "parent_orgnr": "",
+                          "navn": ct["name"], "orgform": "", "bransje_kode": "",
+                          "bransje": "Ditec-senter", "kategori": "Bilpleie",
+                          "adresse": ct["adresse"], "postnr": ct["postnr"],
+                          "poststed": ct["poststed"], "kommune": "",
+                          "lat": ct["lat"], "lon": ct["lon"], "geo_nivaa": "ditec-cms",
+                          "epost": ct["epost"], "mobil": ct["mobil"], "nettside": "",
+                          "ansatte": None, "aktivitet": "", "ditec": True})
+    return comps
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def companies_for(land):
+    """Bedriftslista for landet, med live Ditec-sentre flettet inn for Sverige.
+    Mellomlagret, så fletting/henting gjøres ikke på hver rerun."""
+    comps = [dict(c) for c in load_companies(land)]
+    if land == "SE":
+        comps = _merge_ditec(comps)
+    return comps
+
+
 def current_land():
     return st.session_state.get("land", "NO")
 
@@ -692,12 +764,12 @@ if LOGIN_TOKEN and _qp.get("t") != LOGIN_TOKEN:
 
 _settings = load_settings(email)
 is_admin = email in ADMIN_EMAILS
-companies = load_companies(current_land())
+companies = companies_for(current_land())
 if not companies and current_land() != "NO":
     # Valgt land mangler data ennå – fall tilbake til Norge så appen ikke låser seg.
     _miss = current_land()
     st.session_state["land"] = "NO"
-    companies = load_companies("NO")
+    companies = companies_for("NO")
     st.session_state["_toast"] = (f"Data for {LAND_NAVN.get(_miss, _miss)} er ikke lagt inn "
                                    "ennå – viser Norge.")
 
@@ -785,6 +857,8 @@ def page_header(title, sub):
 
 UKEDAGER = ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"]
 _kat_present = [k for k in KATEGORIER if any(c.get("kategori") == k for c in companies)]
+if any(c.get("ditec") for c in companies):
+    _kat_present = ["Ditec"] + _kat_present   # eget filtervalg for Ditec-sentre
 
 
 def _poly_cum(points):
@@ -984,8 +1058,10 @@ def _plan_pool(valgte, orgvalg, skip_dates):
     skip = (recently_visited(email) | excluded_orgnr(email)
             | planned_orgnr(email, skip_dates=skip_dates))
     off = {"Kun AS": "AS", "Kun ENK": "ENK"}.get(orgvalg)
+    want_ditec = "Ditec" in valgte   # «Ditec» er et eget filter på tvers av kategorier
     return [c for c in companies
-            if c.get("kategori") in valgte and str(c.get("orgnr")) not in skip
+            if (c.get("kategori") in valgte or (want_ditec and c.get("ditec")))
+            and str(c.get("orgnr")) not in skip
             and (off is None or c.get("orgform") == off)]
 
 
@@ -1114,12 +1190,14 @@ def alt_company(meta, current_comps, orgnr):
     det = f.get("detour") or 25
     off = {"Kun AS": "AS", "Kun ENK": "ENK"}.get(f.get("org"))
     kat = f.get("kat") or _kat_present
+    want_ditec = "Ditec" in kat
     skip = (recently_visited(email) | excluded_orgnr(email)
             | {str(c.get("orgnr")) for c in current_comps})
     speed = float(_settings.get("speed_kmh") or 70)
     best, bestd = None, 1e9
     for c in companies:
-        if (c.get("kategori") not in kat or c.get("lat") is None
+        if ((c.get("kategori") not in kat and not (want_ditec and c.get("ditec")))
+                or c.get("lat") is None
                 or str(c.get("orgnr")) in skip
                 or (off is not None and c.get("orgform") != off)):
             continue
@@ -2104,6 +2182,10 @@ if nav == "Planlegging":
             st.multiselect("…eller velg selv", _kat_present, key="_w_cat",
                            disabled=ss["w_all"])
             ss["w_cat"] = list(st.session_state.get("_w_cat") or [])
+            if current_land() == "SE":
+                st.caption("Tips: Det svenske registeret (SCB) har ingen egen kode for "
+                           "bilpleie, så flere bilpleie-/biltvätt-bedrifter ligger under "
+                           "«Verksted». Velg også Verksted for å finne flere.")
         with st.expander("Flere valg"):
             if current_land() == "NO":
                 _orgs = ["AS + ENK", "Kun AS", "Kun ENK"]
