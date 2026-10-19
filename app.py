@@ -262,6 +262,9 @@ _SV = {
     "Vis besøk for": "Visa besök för", "Alle selgere": "Alla säljare", "Meg": "Jag",
     "Stopp takk-e-posten": "Stoppa tack-e-posten", "Takk-e-posten er stoppet.": "Tack-e-posten är stoppad.",
     "ikke sendt ennå": "inte skickat ännu",
+    "Søk i lista": "Sök i listan", "Bedrift, org.nr eller kommune …": "Företag, org.nr eller kommun …",
+    "besøkt": "besökt", "ganger": "gånger", "gang": "gång",
+    "Besøkt her": "Besökt här", "totalt": "totalt",
     "Denne måneden": "Denna månad", "Hittil i år": "Hittills i år", "Alt": "Allt",
     "Besøk": "Besök", "Kjørt (km)": "Kört (km)",
     "Kjøring summeres fra avstanden til hvert registrerte besøk (anslag for konsernrapportering). "
@@ -1198,6 +1201,21 @@ def user_co2_totals(user):
     return (round(cm, 1), round(cy, 1))
 
 
+@st.cache_data(ttl=120, show_spinner=False)
+def visit_counts(user):
+    """Antall besøk pr. orgnr for en selger (totalt). Mellomlagret 2 min."""
+    try:
+        rows = sb_get("visits", "orgnr", {"user_email": f"eq.{user}"})
+    except Exception:
+        return {}
+    c = {}
+    for r in rows:
+        o = str(r.get("orgnr") or "")
+        if o:
+            c[o] = c.get(o, 0) + 1
+    return c
+
+
 if st.session_state.get("_toast"):
     st.toast(st.session_state.pop("_toast"))
 
@@ -1738,6 +1756,7 @@ def register_dialog(company):
             if no_more:
                 exclude_company(email, company)
             user_co2_totals.clear()
+            visit_counts.clear()
             _m = t("Besøk registrert – rapport sendt.")
             st.session_state["_toast"] = _m + (t(" Kunden skjules fra framtidige forslag.")
                                                if no_more else t(" Bedriften er merket besøkt."))
@@ -2322,6 +2341,7 @@ if nav == "Planlegging":
             st.rerun()
         if len(plans) > 1:
             leaflet_multi_html(plans, focus=_focus)
+        _vc = visit_counts(email)
         for pi, p in enumerate(plans):
             d = date.fromisoformat(p["plan_date"])
             meta = p["meta"]
@@ -2336,6 +2356,9 @@ if nav == "Planlegging":
                 for i, c in enumerate(p["companies"], 1):
                     org = str(c.get("orgnr"))
                     sub = []
+                    _nb = _vc.get(org, 0)
+                    if _nb:
+                        sub.append(f"{t('besøkt')} {_nb} {t('ganger') if _nb != 1 else t('gang')}")
                     if c.get("poststed"):
                         sub.append(c["poststed"])
                     if c.get("kategori"):
@@ -2825,6 +2848,8 @@ if nav == "Historikk":
             return hist_names.get(o, o)
         sel_user = st.selectbox(t("Vis besøk for"), _opts, format_func=_hist_lbl, key="hist_user")
     periode = st.radio(t("Periode"), ["Denne måneden", "Hittil i år", "Alt"], horizontal=True, format_func=t)
+    hist_q = st.text_input(t("Søk i lista"), placeholder=t("Bedrift, org.nr eller kommune …"),
+                           key="hist_q").strip().lower()
     params = {"order": "visited_on.desc"}
     params["user_email"] = "not.is.null" if sel_user == "__ALL__" else f"eq.{sel_user}"
     if periode == "Denne måneden":
@@ -2836,6 +2861,19 @@ if nav == "Historikk":
     except Exception as exc:
         rows = []
         st.error(t("Kunne ikke hente:") + f" {exc}")
+    if hist_q:
+        rows = [r for r in rows if hist_q in
+                f"{r.get('navn','')} {r.get('orgnr','')} {r.get('kommune','')}".lower()]
+    # Totalt antall besøk pr. (selger, orgnr) – for «antall ganger besøkt» (hele historikken).
+    try:
+        _allv = sb_get("visits", "orgnr,user_email",
+                       {"user_email": params["user_email"]})
+    except Exception:
+        _allv = []
+    visit_n = {}
+    for _v in _allv:
+        _k = (_v.get("user_email", ""), str(_v.get("orgnr") or ""))
+        visit_n[_k] = visit_n.get(_k, 0) + 1
     tot_km = round(sum(float(r.get("leg_km") or 0) for r in rows), 1)
     tot_co2 = round(sum(float(r.get("co2_g") or 0) for r in rows) / 1000.0, 1)
     m1, m2, m3 = st.columns(3)
@@ -2870,6 +2908,10 @@ if nav == "Historikk":
                         f"<span class='bnc-sub'>{r.get('visited_on','')} · {r.get('kommune','')}"
                         + (f" · {_seller}" if _show_seller else "") + "</span>",
                         unsafe_allow_html=True)
+            _nvis = visit_n.get((r.get("user_email", ""), str(r.get("orgnr") or "")), 0)
+            if _nvis:
+                st.caption(f"{t('Besøkt her')} {_nvis} {t('ganger') if _nvis != 1 else t('gang')} "
+                           + t("totalt"))
             st.write(r.get("report") or t("_Ingen rapporttekst._"))
             if r.get("contact_email"):
                 try:
@@ -2897,6 +2939,7 @@ if nav == "Historikk":
                 try:
                     sb_delete("visits", {"id": f"eq.{r.get('id')}"})
                     user_co2_totals.clear()
+                    visit_counts.clear()
                     st.session_state["_toast"] = t("Besøk slettet.")
                     st.rerun()
                 except Exception as exc:
